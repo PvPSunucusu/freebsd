@@ -81,15 +81,20 @@ jobs:
               ports="$1"
               family="$2"
               extra_opts="${3:-}"
+              extra_cxx="${4:-}"
               client="$ports/databases/${family}-client"
               server="$ports/databases/${family}-server"
               test -d "$client"
               test -d "$server"
 
               sudo env BATCH=yes DISABLE_VULNERABILITIES=yes ALLOW_UNSUPPORTED_SYSTEM=yes \
-                OPTIONS_UNSET="$extra_opts" make -C "$client" clean package install
+                OPTIONS_UNSET="$extra_opts" \
+                CXXFLAGS="-O2 -pipe -fno-strict-aliasing $extra_cxx" \
+                make -C "$client" clean package install
               sudo env BATCH=yes DISABLE_VULNERABILITIES=yes ALLOW_UNSUPPORTED_SYSTEM=yes \
-                OPTIONS_UNSET="$extra_opts" make -C "$server" clean package install
+                OPTIONS_UNSET="$extra_opts" \
+                CXXFLAGS="-O2 -pipe -fno-strict-aliasing $extra_cxx" \
+                make -C "$server" clean package install
 
               pkg info -e "${family}-client" || exit 20
               pkg info -e "${family}-server" || exit 21
@@ -97,18 +102,12 @@ jobs:
               sudo env ASSUME_ALWAYS_YES=yes pkg delete -fy "${family}-server" "${family}-client" || true
             }
 
-            # MySQL 5.5 final FreeBSD port. SSL is deliberately disabled: 5.5
-            # predates OpenSSL 3 and the Metin2 database workload does not need
-            # TLS inside the local game/database host path.
             fetch_ports 9f0ff92f6deaa2187cdb33a27f5aebbdd2c0d71d /tmp/ports-mysql55
-            build_pair /tmp/ports-mysql55 mysql55 "SSL"
+            build_pair /tmp/ports-mysql55 mysql55 "SSL" "-Wno-register"
 
-            # This is the final MySQL 5.6 tree after FreeBSD's OpenSSL 3 base
-            # compatibility fix (PR 271656), before the port was removed.
             fetch_ports f8301140055f9b0fac6e3c23458e48c7cff2ef05 /tmp/ports-mysql56
-            build_pair /tmp/ports-mysql56 mysql56 "ARCHIVE BLACKHOLE EXAMPLE FEDERATED PARTITION"
+            build_pair /tmp/ports-mysql56 mysql56 "ARCHIVE BLACKHOLE EXAMPLE FEDERATED PARTITION" "-Wno-register"
 
-            # Last MariaDB 10.3 release in ports.
             fetch_ports 06b18c35a7ac6d3bfda4a40cab1b3ff638b2ac0c /tmp/ports-mariadb103
             build_pair /tmp/ports-mariadb103 mariadb103 \
               "WSREP CONNECT_EXTRA MROONGA OQGRAPH ROCKSDB SPHINX SPIDER"
