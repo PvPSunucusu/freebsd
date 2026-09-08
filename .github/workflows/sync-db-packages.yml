@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: db-package-sync-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   sync:
