@@ -1,0 +1,107 @@
+name: Sync FreeBSD database packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - db-matrix-freebsd11-14
+    paths:
+      - '.github/workflows/sync-db-packages.yml'
+      - 'tools/sync_db_packages.py'
+      - 'tools/run_db_sync.py'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: db-package-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - name: Checkout metadata without cloning all package blobs
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.gitattributes
+            /README.md
+            /tools/
+            /.github/workflows/
+            /FreeBSD:11:amd64/latest/packagesite.txz
+            /FreeBSD:11:amd64/latest/SHA256SUMS
+            /FreeBSD:12:amd64/latest/packagesite.txz
+            /FreeBSD:12:amd64/latest/SHA256SUMS
+            /FreeBSD:13:amd64/latest/packagesite.txz
+            /FreeBSD:13:amd64/latest/SHA256SUMS
+            /FreeBSD:14:amd64/latest/packagesite.txz
+            /FreeBSD:14:amd64/latest/SHA256SUMS
+
+      - name: Install package archive reader
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools xz-utils
+
+      - name: Validate synchronizer syntax
+        run: |
+          python3 -m py_compile tools/sync_db_packages.py tools/run_db_sync.py
+
+      - name: Import missing same-ABI database packages
+        run: |
+          python3 tools/run_db_sync.py \
+            --import-packages \
+            --allow-community \
+            --report DB_PACKAGE_MATRIX.md \
+            --provenance DB_PACKAGE_SOURCES.json
+
+      - name: Validate generated repository catalogues
+        run: |
+          python3 - <<'PY'
+          import json, tarfile
+          from pathlib import Path
+
+          for major in (11, 12, 13, 14):
+              p = Path(f"FreeBSD:{major}:amd64/latest/packagesite.txz")
+              with tarfile.open(p, "r:xz") as tf:
+                  members = [m for m in tf.getmembers() if m.isfile() and m.name.endswith("packagesite.yaml")]
+                  assert len(members) == 1, (major, members)
+                  data = tf.extractfile(members[0]).read().decode("utf-8")
+              rows = [json.loads(line) for line in data.splitlines() if line.strip()]
+              names = {row.get("name") for row in rows}
+              assert len(names) == len(rows), f"FreeBSD {major}: duplicate package name in catalogue"
+              print(f"FreeBSD {major}: catalogue OK, {len(rows)} packages")
+          PY
+
+      - name: Publish matrix to workflow summary
+        run: cat DB_PACKAGE_MATRIX.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit synchronized packages and metadata
+        run: |
+          git config user.name "PvPSunucusu repo bot"
+          git config user.email "actions@users.noreply.github.com"
+
+          git add --sparse DB_PACKAGE_MATRIX.md DB_PACKAGE_SOURCES.json
+          for major in 11 12 13 14; do
+            git add --sparse "FreeBSD:${major}:amd64/latest/packagesite.txz" \
+                             "FreeBSD:${major}:amd64/latest/SHA256SUMS"
+            if [ -d "FreeBSD:${major}:amd64/latest/All" ]; then
+              find "FreeBSD:${major}:amd64/latest/All" -type f -print0 \
+                | xargs -0 -r git add --sparse --
+            fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "No repository changes were required."
+            exit 0
+          fi
+
+          git commit -m "Sync legacy database packages for FreeBSD 11-14 [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME}
