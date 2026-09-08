@@ -54,10 +54,6 @@ jobs:
             sudo mkdir -p "$OUT"
             sudo chown -R "$(id -u):$(id -g)" "$OUT"
 
-            # FreeBSD 13 package metadata is still available from the official
-            # repository. Keep the stock repository enabled so the historical
-            # ports can resolve their build tools and libraries. Nepustil is a
-            # secondary fallback for packages no longer present in official latest.
             sudo mkdir -p /usr/local/etc/pkg/repos
             sudo sh -c 'cat > /usr/local/etc/pkg/repos/PvPArchive.conf' <<'EOF'
             PvPArchive: {
@@ -98,32 +94,31 @@ jobs:
               ports="$1"
               family="$2"
               extra_opts="${3:-}"
+              extra_cxx="${4:-}"
               client="$ports/databases/${family}-client"
               server="$ports/databases/${family}-server"
-
               test -d "$client"
               test -d "$server"
 
               sudo env BATCH=yes DISABLE_VULNERABILITIES=yes ALLOW_UNSUPPORTED_SYSTEM=yes \
-                OPTIONS_UNSET="$extra_opts" make -C "$client" clean package install
+                OPTIONS_UNSET="$extra_opts" \
+                CXXFLAGS="-O2 -pipe -fno-strict-aliasing $extra_cxx" \
+                make -C "$client" clean package install
               sudo env BATCH=yes DISABLE_VULNERABILITIES=yes ALLOW_UNSUPPORTED_SYSTEM=yes \
-                OPTIONS_UNSET="$extra_opts" make -C "$server" clean package install
+                OPTIONS_UNSET="$extra_opts" \
+                CXXFLAGS="-O2 -pipe -fno-strict-aliasing $extra_cxx" \
+                make -C "$server" clean package install
 
               pkg info -e "${family}-client" || exit 20
               pkg info -e "${family}-server" || exit 21
               snapshot_closure "$family"
-
               sudo env ASSUME_ALWAYS_YES=yes pkg delete -fy "${family}-server" "${family}-client" || true
             }
 
-            # 2022-05-16: both mysql55 and mysql56 are present at their final
-            # FreeBSD ports versions (5.5.62_3 and 5.6.51).
             fetch_ports 9f0ff92f6deaa2187cdb33a27f5aebbdd2c0d71d /tmp/ports-mysql
-            build_pair /tmp/ports-mysql mysql55 "SSL"
-            build_pair /tmp/ports-mysql mysql56 "ARCHIVE BLACKHOLE EXAMPLE FEDERATED PARTITION"
+            build_pair /tmp/ports-mysql mysql55 "SSL" "-Wno-register"
+            build_pair /tmp/ports-mysql mysql56 "ARCHIVE BLACKHOLE EXAMPLE FEDERATED PARTITION" "-Wno-register"
 
-            # 2023-02-19: MariaDB 10.3.38. Cluster/search engines are not needed
-            # for the Metin2 database workload, keeping the fallback small.
             fetch_ports 06b18c35a7ac6d3bfda4a40cab1b3ff638b2ac0c /tmp/ports-mariadb
             build_pair /tmp/ports-mariadb mariadb103 \
               "WSREP CONNECT_EXTRA MROONGA OQGRAPH ROCKSDB SPHINX SPIDER"
@@ -216,4 +211,5 @@ jobs:
           fi
 
           git commit -m 'Add native legacy DB packages for FreeBSD 13 [skip ci]'
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin HEAD:${GITHUB_REF_NAME}
