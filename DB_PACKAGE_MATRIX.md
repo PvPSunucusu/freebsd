@@ -4,10 +4,10 @@ Bu dosya `tools/sync_db_packages.py` tarafindan uretilir. Paketler FreeBSD major
 
 | FreeBSD | MariaDB 11.4 | MariaDB 10.6 | MariaDB 10.5 | MariaDB 10.3 | MySQL 5.6 | MySQL 5.5 |
 |---:|---|---|---|---|---|---|
-| 11 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ✅ 10.5.5<br><sub>Nepustil archive current</sub> | ❌ same-ABI paket bulunamadi | ✅ client=5.6.42_1, server=5.6.42_2 | ❌ same-ABI paket bulunamadi |
-| 12 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ✅ 10.5.8 | ❌ same-ABI paket bulunamadi | ✅ 5.6.51<br><sub>Pinned GitHub community fallback</sub> | ❌ same-ABI paket bulunamadi |
-| 13 | ❌ same-ABI paket bulunamadi | ✅ 10.6.18_1<br><sub>Nepustil archive current</sub> | ✅ 10.5.16 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi |
-| 14 | ✅ 11.4.12<br><sub>Nepustil archive current</sub> | ✅ 10.6.18 | ✅ 10.5.24 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi |
+| 11 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ✅ 10.5.5 | ❌ same-ABI paket bulunamadi | ✅ client=5.6.42_1, server=5.6.42_2 | ❌ same-ABI paket bulunamadi |
+| 12 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ✅ 10.5.8 | ❌ same-ABI paket bulunamadi | ✅ 5.6.51 | ❌ same-ABI paket bulunamadi |
+| 13 | ✅ 11.4.10 | ✅ 10.6.18_1 | ✅ 10.5.16 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi |
+| 14 | ✅ 11.4.12 | ✅ 10.6.18 | ✅ 10.5.24 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi |
 
 ## Kaynak ve guvenlik politikasi
 
