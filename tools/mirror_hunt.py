@@ -37,7 +37,7 @@ TARGET_FAMILIES = (
     "mariadb114", "mariadb106", "mariadb105", "mariadb103", "mysql56", "mysql55",
 )
 PKG_EXTENSIONS = (".pkg", ".txz")
-UA = "PvPSunucusu-FreeBSD-Mirror-Hunt/3.0"
+UA = "PvPSunucusu-FreeBSD-Mirror-Hunt/3.1"
 
 NEPUSTIL_SNAPSHOTS = {
     11: ("114", "113", "112", "111", "110"),
@@ -139,8 +139,18 @@ def metadata_index(base_url: str) -> Dict[str, str]:
 
 
 def source_entries(base_url: str) -> Dict[str, str]:
-    entries = html_index(base_url)
-    return entries if entries else metadata_index(base_url)
+    # Some mirrors (notably SGGS historical trees) cap the browsable All/
+    # directory listing at exactly 10,000 entries even though packagesite
+    # contains 30k+ packages.  If HTML is accepted first, packages beginning
+    # later in the alphabet (including mariadb/mysql) can be silently missed.
+    # Prefer the complete repository metadata and merge the HTML listing only
+    # as a supplement for packages absent from metadata.
+    metadata = metadata_index(base_url)
+    listing = html_index(base_url)
+    if metadata:
+        metadata.update({name: url for name, url in listing.items() if name not in metadata})
+        return metadata
+    return listing
 
 
 def branches() -> Tuple[str, ...]:
