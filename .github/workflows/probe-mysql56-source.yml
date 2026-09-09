@@ -20,8 +20,7 @@ jobs:
         run: |
           set -euxo pipefail
           curl -fL --connect-timeout 15 --max-time 60 -o /tmp/mysql56_by_helpdev.sh http://kamil2321.ovh/mysql/mysql56_by_helpdev.sh
-          echo '--- SCRIPT START ---'
-          sed -n '1,260p' /tmp/mysql56_by_helpdev.sh
-          echo '--- SCRIPT END ---'
-          echo '--- URLS ---'
-          grep -Eo 'https?://[^"[:space:]<>]+' /tmp/mysql56_by_helpdev.sh | sort -u || true
+          echo '--- DOWNLOAD RELATED LINES ---'
+          grep -nE 'BASE_URL|fetch |curl |wget |mysql56|libssl|libcrypto|ARCH_TYPE' /tmp/mysql56_by_helpdev.sh || true
+          echo '--- SCRIPT TAIL ---'
+          sed -n '240,520p' /tmp/mysql56_by_helpdev.sh
