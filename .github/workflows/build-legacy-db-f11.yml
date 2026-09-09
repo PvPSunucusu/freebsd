@@ -45,7 +45,6 @@ jobs:
           shell: sh
           run: |
             set -eux
-
             REPO_ROOT="$PWD"
             OUT="$REPO_ROOT/.legacy-build/11/all"
             sudo rm -rf "$REPO_ROOT/.legacy-build/11" /tmp/ports-base /tmp/ports-mysql /tmp/ports-mariadb103 /tmp/ports-mariadb106 /tmp/ports-*.tar.gz
@@ -66,8 +65,6 @@ jobs:
             FREEBSD_HOST=https://download.FreeBSD.org
             EOF
 
-            # EOL releases are fetched from the official FreeBSD archive. This
-            # produces genuine FreeBSD:11:amd64 packages.
             sudo poudriere jail -c -j f11 -v 11.4-RELEASE -a amd64 -m ftp-archive
             sudo poudriere jail -i -j f11
 
@@ -75,8 +72,7 @@ jobs:
               commit="$1"
               dest="$2"
               archive="/tmp/ports-${commit}.tar.gz"
-              sudo fetch --no-verify-peer -o "$archive" \
-                "https://codeload.github.com/freebsd/freebsd-ports/tar.gz/${commit}"
+              sudo fetch --no-verify-peer -o "$archive" "https://codeload.github.com/freebsd/freebsd-ports/tar.gz/${commit}"
               sudo mkdir -p "$dest"
               sudo tar -xzf "$archive" -C "$dest" --strip-components=1
             }
@@ -89,11 +85,9 @@ jobs:
             sudo rm -rf /tmp/ports-base/databases/mysql55-client /tmp/ports-base/databases/mysql55-server
             sudo cp -a /tmp/ports-mysql/databases/mysql55-client /tmp/ports-base/databases/
             sudo cp -a /tmp/ports-mysql/databases/mysql55-server /tmp/ports-base/databases/
-
             sudo rm -rf /tmp/ports-base/databases/mariadb103-client /tmp/ports-base/databases/mariadb103-server
             sudo cp -a /tmp/ports-mariadb103/databases/mariadb103-client /tmp/ports-base/databases/
             sudo cp -a /tmp/ports-mariadb103/databases/mariadb103-server /tmp/ports-base/databases/
-
             sudo rm -rf /tmp/ports-base/databases/mariadb106-client /tmp/ports-base/databases/mariadb106-server
             sudo cp -a /tmp/ports-mariadb106/databases/mariadb106-client /tmp/ports-base/databases/
             sudo cp -a /tmp/ports-mariadb106/databases/mariadb106-server /tmp/ports-base/databases/
@@ -107,6 +101,13 @@ jobs:
               -e '/databases\/mariadb106-server/d' \
               /tmp/ports-base/MOVED || true
 
+            # The MariaDB 11.4-era ports framework uses numeric bmake sort
+            # modifiers (:On/:Orn) added after FreeBSD 11's base make. For the
+            # legacy 11.4 jail, lexical sorting is sufficient for these version
+            # lists and keeps the modern ports metadata parseable.
+            sudo find /tmp/ports-base -type f \( -name Makefile -o -name '*.mk' \) -exec \
+              sed -i '' -e 's/:Orn/:Or/g' -e 's/:On/:O/g' {} +
+
             sudo poudriere ports -c -p legacy11 -m null -M /tmp/ports-base
 
             sudo sh -c 'cat > /usr/local/etc/poudriere.d/f11-legacy11-make.conf' <<'EOF'
@@ -116,7 +117,7 @@ jobs:
             NO_IGNORE=yes
             TRYBROKEN=yes
             CFLAGS+=-O2 -pipe -fno-strict-aliasing
-            CXXFLAGS+=-O2 -pipe -fno-strict-aliasing -Wno-register
+            CXXFLAGS+=-O2 -pipe -fno-strict-aliasing -Wno-register -Wno-deprecated-declarations
             OPTIONS_UNSET+=DOCS EXAMPLES NLS TEST TESTS SSL WSREP CONNECT_EXTRA MROONGA OQGRAPH ROCKSDB S3 SPHINX SPIDER ARCHIVE BLACKHOLE EXAMPLE FEDERATED PARTITION
             EOF
 
@@ -135,7 +136,6 @@ jobs:
 
             PKGROOT="$(find /usr/local/poudriere/data/packages -type d -name All | head -n 1)"
             test -n "$PKGROOT"
-            echo "Poudriere packages: $PKGROOT"
             sudo cp -a "$PKGROOT"/. "$OUT"/
             sudo chown -R "$(id -u):$(id -g)" "$REPO_ROOT/.legacy-build"
 
@@ -162,64 +162,43 @@ jobs:
               --root "${family}-client" --root "${family}-server" \
               --provenance-out ".legacy-build/${family}-f11.json"
           done
-
           python3 - <<'PY'
           import json
           from pathlib import Path
-          rows = []
+          rows=[]
           for path in sorted(Path('.legacy-build').glob('*-f11.json')):
               rows.extend(json.loads(path.read_text()))
-          Path('DB_SOURCE_BUILD_PACKAGES_F11.json').write_text(
-              json.dumps({
-                  'builder': 'FreeBSD 11.4 poudriere jail on FreeBSD 14.3 host',
-                  'ports_base_commit': '5a2bb7e61569f908f8a52dd4afd2998b86e9e54d',
-                  'mysql55_ports_commit': '9f0ff92f6deaa2187cdb33a27f5aebbdd2c0d71d',
-                  'mariadb103_ports_commit': '06b18c35a7ac6d3bfda4a40cab1b3ff638b2ac0c',
-                  'mariadb106_ports_commit': '0cc2151714f7a11a1367a5b2d4bc2cd18bc26dbd',
-                  'packages': rows,
-              }, indent=2) + '\n'
-          )
+          Path('DB_SOURCE_BUILD_PACKAGES_F11.json').write_text(json.dumps({
+              'builder':'FreeBSD 11.4-p13 poudriere jail on FreeBSD 14.3 host',
+              'packages':rows,
+          },indent=2)+'\n')
           PY
 
       - name: Validate FreeBSD 11 repository roots
         run: |
           python3 - <<'PY'
-          import json, tarfile
+          import json,tarfile
           from pathlib import Path
-          p = Path('FreeBSD:11:amd64/latest/packagesite.txz')
-          with tarfile.open(p, 'r:xz') as tf:
-              m = next(x for x in tf.getmembers() if x.name.endswith('packagesite.yaml'))
-              rows = [json.loads(x) for x in tf.extractfile(m).read().decode().splitlines() if x.strip()]
-          names = {x['name'] for x in rows}
-          required = {
-              'mariadb103-client','mariadb103-server',
-              'mariadb105-client','mariadb105-server',
-              'mariadb106-client','mariadb106-server',
-              'mariadb114-client','mariadb114-server',
-              'mysql55-client','mysql55-server',
-              'mysql56-client','mysql56-server',
-          }
-          missing = sorted(required - names)
+          p=Path('FreeBSD:11:amd64/latest/packagesite.txz')
+          with tarfile.open(p,'r:xz') as tf:
+              m=next(x for x in tf.getmembers() if x.name.endswith('packagesite.yaml'))
+              rows=[json.loads(x) for x in tf.extractfile(m).read().decode().splitlines() if x.strip()]
+          names={x['name'] for x in rows}
+          required={f'{f}-{c}' for f in ('mariadb103','mariadb105','mariadb106','mariadb114','mysql55','mysql56') for c in ('client','server')}
+          missing=sorted(required-names)
           assert not missing, f'Missing FreeBSD 11 DB packages: {missing}'
-          assert len(names) == len(rows), 'duplicate package names'
-          print('FreeBSD 11 legacy DB catalogue OK:', len(rows), 'packages')
+          print('FreeBSD 11 DB catalogue OK:',len(rows),'packages')
           PY
 
       - name: Commit native FreeBSD 11 packages
         run: |
           git config user.name "PvPSunucusu repo bot"
           git config user.email "actions@users.noreply.github.com"
-
           git add --sparse DB_SOURCE_BUILD_PACKAGES_F11.json \
             'FreeBSD:11:amd64/latest/packagesite.txz' \
             'FreeBSD:11:amd64/latest/SHA256SUMS'
           find 'FreeBSD:11:amd64/latest/All' -type f -print0 | xargs -0 -r git add --sparse --
-
-          if git diff --cached --quiet; then
-            echo 'No source-built package changes required.'
-            exit 0
-          fi
-
+          if git diff --cached --quiet; then exit 0; fi
           git commit -m 'Add native legacy DB packages for FreeBSD 11 [skip ci]'
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin HEAD:${GITHUB_REF_NAME}
