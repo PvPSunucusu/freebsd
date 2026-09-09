@@ -1,0 +1,68 @@
+name: Validate MySQL 5.5 on FreeBSD 12-14
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mysql55-56-freebsd12-14
+    paths:
+      - '.github/workflows/validate-mysql55-compat.yml'
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - freebsd: '12.4'
+            major: '12'
+          - freebsd: '13.4'
+            major: '13'
+          - freebsd: '14.3'
+            major: '14'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download MySQL 5.5 package pair
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools jq
+          mkdir -p .mysql55-compat
+          base='https://raw.githubusercontent.com/PvPSunucusu/freebsd/main/FreeBSD%3A11%3Aamd64/latest/All'
+          for f in mysql55-client-5.5.62_3.pkg mysql55-server-5.5.62_3.pkg; do
+            curl -fL --retry 3 "$base/$f" -o ".mysql55-compat/$f"
+            sha256sum ".mysql55-compat/$f"
+            bsdtar -xOf ".mysql55-compat/$f" +COMPACT_MANIFEST | jq '{name,version,arch,abi,deps}'
+          done
+
+      - name: Test on FreeBSD ${{ matrix.freebsd }}
+        uses: cross-platform-actions/action@24ef01df165c76df1ed2b9f9e9212e78dc2fc963
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: ${{ matrix.freebsd }}
+          shell: sh
+          run: |
+            set -eux
+            freebsd-version
+            uname -a
+            cd "$GITHUB_WORKSPACE/.mysql55-compat"
+            # Install common compatibility sets when available. Missing ones are
+            # harmless here; the decisive check is ldd + actual mysql/mysqld execution.
+            sudo env ASSUME_ALWAYS_YES=yes pkg update -f || true
+            sudo env ASSUME_ALWAYS_YES=yes pkg install -y compat11x-amd64 compat12x-amd64 || true
+            sudo env ASSUME_ALWAYS_YES=yes pkg install -y ./mysql55-client-5.5.62_3.pkg ./mysql55-server-5.5.62_3.pkg
+            pkg info mysql55-client mysql55-server
+            mysql --version
+            MYSQLD=$(find /usr/local -type f -name mysqld 2>/dev/null | head -n1)
+            test -n "$MYSQLD"
+            "$MYSQLD" --version
+            if ldd "$MYSQLD" | grep -q 'not found'; then ldd "$MYSQLD"; exit 1; fi
+            ldd "$MYSQLD"
+            echo "MySQL 5.5.62_3 runtime OK on FreeBSD ${{ matrix.major }}"
