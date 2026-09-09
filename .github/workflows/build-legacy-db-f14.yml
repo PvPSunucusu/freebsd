@@ -1,10 +1,10 @@
-name: Build legacy DB packages - FreeBSD 14
+name: Complete MySQL 5.5/5.6 - FreeBSD 14
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - db-matrix-freebsd11-14
+      - mysql55-56-all-freebsd
     paths:
       - '.github/workflows/build-legacy-db-f14.yml'
       - 'tools/build_legacy_db_native.sh'
@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: legacy-db-f14-${{ github.ref }}
+  group: mysql-f14-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -36,12 +36,12 @@ jobs:
             /FreeBSD:14:amd64/latest/packagesite.txz
             /FreeBSD:14:amd64/latest/SHA256SUMS
 
-      - name: Build missing DB families natively on FreeBSD 14.3
+      - name: Build MySQL 5.5 and 5.6 natively on FreeBSD 14.0
         uses: cross-platform-actions/action@24ef01df165c76df1ed2b9f9e9212e78dc2fc963
         with:
           operating_system: freebsd
           architecture: x86-64
-          version: '14.3'
+          version: '14.0'
           shell: sh
           run: |
             set -eux
@@ -52,10 +52,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends libarchive-tools xz-utils
 
-      - name: Import required runtime package closures
+      - name: Import MySQL runtime closures
         run: |
           set -eux
-          for family in mysql55 mysql56 mariadb103; do
+          for family in mysql55 mysql56; do
             python3 tools/import_package_closure.py \
               --repo 'FreeBSD:14:amd64/latest' \
               --source-dir ".legacy-build/14/${family}/all" \
@@ -66,15 +66,12 @@ jobs:
           import json
           from pathlib import Path
           rows=[]
-          for p in sorted(Path('.legacy-build').glob('*-f14.json')):
+          for p in sorted(Path('.legacy-build').glob('mysql*-f14.json')):
               rows.extend(json.loads(p.read_text()))
-          Path('DB_SOURCE_BUILD_PACKAGES_F14.json').write_text(json.dumps({
-              'builder':'FreeBSD 14.3 native VM',
-              'packages':rows,
-          },indent=2)+'\n')
+          Path('DB_SOURCE_BUILD_PACKAGES_F14.json').write_text(json.dumps(rows,indent=2)+'\n')
           PY
 
-      - name: Validate FreeBSD 14 DB roots
+      - name: Validate FreeBSD 14 MySQL roots
         run: |
           python3 - <<'PY'
           import json,tarfile
@@ -84,13 +81,13 @@ jobs:
               m=next(x for x in tf.getmembers() if x.name.endswith('packagesite.yaml'))
               rows=[json.loads(x) for x in tf.extractfile(m).read().decode().splitlines() if x.strip()]
           names={x['name'] for x in rows}
-          required={f'{f}-{c}' for f in ('mariadb103','mariadb105','mariadb106','mariadb114','mysql55','mysql56') for c in ('client','server')}
+          required={'mysql55-client','mysql55-server','mysql56-client','mysql56-server'}
           missing=sorted(required-names)
-          assert not missing, f'Missing FreeBSD 14 DB packages: {missing}'
-          print('FreeBSD 14 DB catalogue OK:',len(rows),'packages')
+          assert not missing, f'Missing FreeBSD 14 MySQL packages: {missing}'
+          print('FreeBSD 14 MySQL 5.5/5.6 OK')
           PY
 
-      - name: Commit native FreeBSD 14 packages
+      - name: Commit FreeBSD 14 MySQL packages
         run: |
           git config user.name "PvPSunucusu repo bot"
           git config user.email "actions@users.noreply.github.com"
@@ -99,6 +96,6 @@ jobs:
             'FreeBSD:14:amd64/latest/SHA256SUMS'
           find 'FreeBSD:14:amd64/latest/All' -type f -print0 | xargs -0 -r git add --sparse --
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Add native legacy DB packages for FreeBSD 14 [skip ci]'
+          git commit -m 'Add MySQL 5.5 and 5.6 for FreeBSD 14 [skip ci]'
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin HEAD:${GITHUB_REF_NAME}
