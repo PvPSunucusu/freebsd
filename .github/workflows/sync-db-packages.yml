@@ -9,6 +9,7 @@ on:
       - '.github/workflows/sync-db-packages.yml'
       - 'tools/sync_db_packages.py'
       - 'tools/mirror_hunt.py'
+      - 'tools/extended_mirror_hunt.py'
       - 'tools/run_db_sync.py'
 
 permissions:
@@ -53,11 +54,11 @@ jobs:
 
       - name: Validate synchronizer syntax
         run: |
-          python3 -m py_compile tools/mirror_hunt.py tools/sync_db_packages.py tools/run_db_sync.py
+          python3 -m py_compile tools/mirror_hunt.py tools/extended_mirror_hunt.py tools/sync_db_packages.py tools/run_db_sync.py
 
       - name: Hunt public FreeBSD package mirrors
         run: |
-          python3 tools/mirror_hunt.py
+          python3 tools/extended_mirror_hunt.py
 
       - name: Import missing same-ABI database packages
         run: |
