@@ -14,13 +14,31 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Fetch installer without executing it
+      - name: Download and inspect community MySQL 5.6 packages
         run: |
           set -euxo pipefail
-          curl -fL --connect-timeout 15 --max-time 60 -o /tmp/mysql56_by_helpdev.sh http://kamil2321.ovh/mysql/mysql56_by_helpdev.sh
-          echo '--- DOWNLOAD RELATED LINES ---'
-          grep -nE 'BASE_URL|fetch |curl |wget |mysql56|libssl|libcrypto|ARCH_TYPE' /tmp/mysql56_by_helpdev.sh || true
-          echo '--- SCRIPT TAIL ---'
-          sed -n '240,520p' /tmp/mysql56_by_helpdev.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools
+
+          BASE='http://kamil2321.ovh/mysql/x64'
+          mkdir -p /tmp/mysql56-probe
+          cd /tmp/mysql56-probe
+
+          for f in mysql56-client-5.6.51.pkg mysql56-server-5.6.51.pkg; do
+            curl -fL --connect-timeout 15 --max-time 180 -o "$f" "$BASE/$f"
+            echo "=== $f ==="
+            sha256sum "$f"
+            bsdtar -xOf "$f" +COMPACT_MANIFEST | tee "$f.manifest.json"
+            python3 - "$f.manifest.json" <<'PY'
+import json, sys
+p=sys.argv[1]
+m=json.load(open(p))
+for k in ('name','version','arch','abi','origin'):
+    print(f'{k}={m.get(k)}')
+PY
+          done
+
+          echo '--- INDEX CANDIDATES ---'
+          curl -fsSL --connect-timeout 15 --max-time 60 "$BASE/" | grep -Eo 'href="[^"]+"' | grep -Ei 'mysql5[56]|\.pkg|\.txz' || true
