@@ -1,0 +1,93 @@
+name: Import MySQL 5.6 for FreeBSD 13
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mysql55-56-freebsd12-14
+    paths:
+      - '.github/workflows/import-mysql56-f13.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download checksum-pinned validated package pair
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools
+          mkdir -p .mysql56-f13
+          base='http://kamil2321.ovh/mysql/x64'
+          curl -fL --retry 3 "$base/mysql56-client-5.6.51.pkg" -o .mysql56-f13/mysql56-client-5.6.51.pkg
+          curl -fL --retry 3 "$base/mysql56-server-5.6.51.pkg" -o .mysql56-f13/mysql56-server-5.6.51.pkg
+          echo '5714b7bd018b0f19dc6dd7ce334917204a1a5476bcb99f2a2f695d6687c36c24  .mysql56-f13/mysql56-client-5.6.51.pkg' | sha256sum -c -
+          echo 'a721636c3a1a8aca9ae5134aee72a2eb7c346cd0f4f78e44a620e115b350ea9e  .mysql56-f13/mysql56-server-5.6.51.pkg' | sha256sum -c -
+
+      - name: Import into FreeBSD 13 static repository
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 tools/import_package_closure.py \
+            --repo 'FreeBSD:13:amd64/latest' \
+            --source-dir '.mysql56-f13' \
+            --root mysql56-client \
+            --root mysql56-server \
+            --provenance-out DB_MYSQL56_F13_SOURCE.json
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('DB_PACKAGE_MATRIX.md')
+          s = p.read_text()
+          old = '| 13 | ✅ 11.4.10 | ✅ 10.6.18_1 | ✅ 10.5.16 | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi | ❌ same-ABI paket bulunamadi |'
+          new = '| 13 | ✅ 11.4.10 | ✅ 10.6.18_1 | ✅ 10.5.16 | ❌ same-ABI paket bulunamadi | ✅ 5.6.51 | ❌ same-ABI paket bulunamadi |'
+          if old in s:
+              p.write_text(s.replace(old, new))
+          elif '✅ 5.6.51' not in next((x for x in s.splitlines() if x.startswith('| 13 |')), ''):
+              raise SystemExit('Unexpected FreeBSD 13 matrix row')
+          PY
+
+      - name: Verify target ABI and catalogue
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for f in FreeBSD:13:amd64/latest/All/mysql56-{client,server}-5.6.51.pkg; do
+            test -f "$f"
+            bsdtar -xOf "$f" +COMPACT_MANIFEST | grep -q 'FreeBSD:13:amd64'
+          done
+          python3 - <<'PY'
+          import json, tarfile
+          p='FreeBSD:13:amd64/latest/packagesite.txz'
+          with tarfile.open(p,'r:xz') as tf:
+              m=next(x for x in tf.getmembers() if x.name.endswith('packagesite.yaml'))
+              rows=[json.loads(x) for x in tf.extractfile(m).read().decode().splitlines() if x.strip()]
+          names={x['name'] for x in rows}
+          assert {'mysql56-client','mysql56-server'} <= names
+          assert len(names)==len(rows)
+          print('FreeBSD 13 MySQL 5.6 catalogue OK')
+          PY
+
+      - name: Commit imported packages
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name 'PvPSunucusu repo bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add DB_MYSQL56_F13_SOURCE.json DB_PACKAGE_MATRIX.md \
+            'FreeBSD:13:amd64/latest/packagesite.txz' \
+            'FreeBSD:13:amd64/latest/SHA256SUMS' \
+            'FreeBSD:13:amd64/latest/All/mysql56-client-5.6.51.pkg' \
+            'FreeBSD:13:amd64/latest/All/mysql56-server-5.6.51.pkg'
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Add validated MySQL 5.6.51 for FreeBSD 13 [skip ci]'
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin HEAD:"$GITHUB_REF_NAME"
