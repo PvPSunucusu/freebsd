@@ -1,0 +1,57 @@
+name: Probe MySQL 5.6 package sources
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mysql55-56-freebsd12-14
+    paths:
+      - '.github/workflows/probe-mysql56-sources.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Probe kamil2321 package source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/probe
+          urls=(
+            'http://kamil2321.ovh/mysql/mysql56_by_helpdev.sh'
+            'https://kamil2321.ovh/mysql/mysql56_by_helpdev.sh'
+          )
+          ok=''
+          for u in "${urls[@]}"; do
+            if curl -fL --connect-timeout 15 --max-time 45 "$u" -o /tmp/probe/mysql56_by_helpdev.sh; then
+              ok="$u"
+              break
+            fi
+          done
+          test -n "$ok"
+          echo "SOURCE=$ok"
+          echo '--- script ---'
+          sed -n '1,260p' /tmp/probe/mysql56_by_helpdev.sh
+          echo '--- urls in script ---'
+          grep -Eo 'https?://[^"[:space:]'"'"']+' /tmp/probe/mysql56_by_helpdev.sh | sort -u || true
+
+      - name: Probe likely direct package URLs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          bases=(
+            'http://kamil2321.ovh/mysql'
+            'https://kamil2321.ovh/mysql'
+            'http://kamil2321.ovh/mysql/64bit'
+            'https://kamil2321.ovh/mysql/64bit'
+            'http://kamil2321.ovh/mysql/amd64'
+            'https://kamil2321.ovh/mysql/amd64'
+          )
+          for name in mysql56-client-5.6.51.pkg mysql56-server-5.6.51.pkg libcrypto_so_111.tgz libssl_so_111.tgz; do
+            for base in "${bases[@]}"; do
+              u="$base/$name"
+              code=$(curl -L -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 25 "$u" || true)
+              echo "$code $u"
+            done
+          done
