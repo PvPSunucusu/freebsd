@@ -55,19 +55,19 @@ jobs:
             sudo env ASSUME_ALWAYS_YES=yes pkg update -f
             sudo env ASSUME_ALWAYS_YES=yes pkg install -y ca_root_nss poudriere-devel git rsync
 
-            sudo mkdir -p /usr/local/etc/poudriere.d
+            sudo mkdir -p /usr/local/etc/poudriere.d /usr/local/poudriere/distfiles
             sudo sh -c 'cat > /usr/local/etc/poudriere.conf' <<'EOF'
             NO_ZFS=yes
             BASEFS=/usr/local/poudriere
+            DISTFILES_CACHE=/usr/local/poudriere/distfiles
             RESOLV_CONF=/etc/resolv.conf
             USE_TMPFS=no
             ALLOW_MAKE_JOBS=yes
             FREEBSD_HOST=https://download.FreeBSD.org
             EOF
 
-            # EOL releases are fetched from the official FreeBSD archive.  This
-            # produces FreeBSD:11:amd64 packages, not repackaged FreeBSD 12/13/14
-            # binaries.
+            # EOL releases are fetched from the official FreeBSD archive. This
+            # produces genuine FreeBSD:11:amd64 packages.
             sudo poudriere jail -c -j f11 -v 11.4-RELEASE -a amd64 -m ftp-archive
             sudo poudriere jail -i -j f11
 
@@ -81,10 +81,6 @@ jobs:
               sudo tar -xzf "$archive" -C "$dest" --strip-components=1
             }
 
-            # Use the first MariaDB 11.4 LTS-era ports tree as the dependency
-            # base. Transplant only the legacy DB origins from snapshots where
-            # those ports still existed. This keeps one coherent Mk/dependency
-            # framework while retaining the removed database ports.
             fetch_ports 5a2bb7e61569f908f8a52dd4afd2998b86e9e54d /tmp/ports-base
             fetch_ports 9f0ff92f6deaa2187cdb33a27f5aebbdd2c0d71d /tmp/ports-mysql
             fetch_ports 06b18c35a7ac6d3bfda4a40cab1b3ff638b2ac0c /tmp/ports-mariadb103
@@ -102,8 +98,6 @@ jobs:
             sudo cp -a /tmp/ports-mariadb106/databases/mariadb106-client /tmp/ports-base/databases/
             sudo cp -a /tmp/ports-mariadb106/databases/mariadb106-server /tmp/ports-base/databases/
 
-            # Remove MOVED entries for restored origins so poudriere accepts
-            # them as deliberate local legacy ports.
             sudo sed -i '' \
               -e '/databases\/mysql55-client/d' \
               -e '/databases\/mysql55-server/d' \
@@ -121,7 +115,6 @@ jobs:
             ALLOW_UNSUPPORTED_SYSTEM=yes
             NO_IGNORE=yes
             TRYBROKEN=yes
-            DEFAULT_VERSIONS+=ssl=openssl111
             CFLAGS+=-O2 -pipe -fno-strict-aliasing
             CXXFLAGS+=-O2 -pipe -fno-strict-aliasing -Wno-register
             OPTIONS_UNSET+=DOCS EXAMPLES NLS TEST TESTS SSL WSREP CONNECT_EXTRA MROONGA OQGRAPH ROCKSDB S3 SPHINX SPIDER ARCHIVE BLACKHOLE EXAMPLE FEDERATED PARTITION
@@ -146,8 +139,6 @@ jobs:
             sudo cp -a "$PKGROOT"/. "$OUT"/
             sudo chown -R "$(id -u):$(id -g)" "$REPO_ROOT/.legacy-build"
 
-            # Prove package ABI in the VM before handing files to the Ubuntu
-            # catalogue importer.
             for family in mysql55 mariadb103 mariadb106 mariadb114; do
               for component in client server; do
                 f="$(find "$OUT" -maxdepth 1 -type f \( -name "${family}-${component}-*.pkg" -o -name "${family}-${component}-*.txz" \) | head -n 1)"
