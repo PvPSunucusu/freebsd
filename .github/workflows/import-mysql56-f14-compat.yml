@@ -52,21 +52,19 @@ jobs:
             sudo env ASSUME_ALWAYS_YES=yes pkg update -f
             sudo env ASSUME_ALWAYS_YES=yes pkg install -y jq
 
-            # Turn the two OpenSSL 1.1 runtime archives used by the proven F14
-            # installation into an ordinary FreeBSD:14 pkg dependency.
             tar -xzf "$SRC/libcrypto_so_111.tgz" -C "$ROOT/stage-compat"
             tar -xzf "$SRC/libssl_so_111.tgz" -C "$ROOT/stage-compat"
             cat > "$ROOT/meta-compat/+MANIFEST" <<'EOF'
-            name: mysql56-openssl111-compat
-            version: 1.0
-            origin: misc/mysql56-openssl111-compat
-            comment: OpenSSL 1.1 runtime compatibility libraries for legacy MySQL 5.6
-            desc: OpenSSL 1.1 shared libraries required by the validated legacy MySQL 5.6.51 compatibility build on FreeBSD 14.
-            maintainer: mail@pvpsunucusu.com
-            www: https://github.com/PvPSunucusu/freebsd
-            prefix: /
-            arch: freebsd:14:x86:64
-            abi: FreeBSD:14:amd64
+            name: "mysql56-openssl111-compat"
+            version: "1.0"
+            origin: "misc/mysql56-openssl111-compat"
+            comment: "OpenSSL 1.1 runtime compatibility libraries for legacy MySQL 5.6"
+            desc: "OpenSSL 1.1 shared libraries required by the validated legacy MySQL 5.6.51 compatibility build on FreeBSD 14."
+            maintainer: "mail@pvpsunucusu.com"
+            www: "https://github.com/PvPSunucusu/freebsd"
+            prefix: "/"
+            arch: "freebsd:14:x86:64"
+            abi: "FreeBSD:14:amd64"
             EOF
             (cd "$ROOT/stage-compat" && find . \( -type f -o -type l \) -print | sed 's#^\./##' | sort > "$ROOT/compat.plist")
             pkg create -f tzst -m "$ROOT/meta-compat" -p "$ROOT/compat.plist" -r "$ROOT/stage-compat" -o "$OUT"
@@ -81,6 +79,7 @@ jobs:
                   .abi="FreeBSD:14:amd64" |
                   .deps["mysql56-openssl111-compat"]={"origin":"misc/mysql56-openssl111-compat","version":"1.0"}' \
                 "$stage/+MANIFEST" > "$ROOT/mysql56-${comp}.manifest"
+              rm -f "$stage/+MANIFEST" "$stage/+COMPACT_MANIFEST"
               pkg create -f tzst -M "$ROOT/mysql56-${comp}.manifest" -r "$stage" -o "$OUT"
             }
             repack_mysql client
@@ -125,7 +124,6 @@ jobs:
           s=p.read_text()
           row=next(x for x in s.splitlines() if x.startswith('| 14 |'))
           parts=[x.strip() for x in row.split('|')]
-          # columns: blank,14,mdb114,mdb106,mdb105,mdb103,mysql56,mysql55,blank
           parts[6]='✅ 5.6.51 (F14 runtime-validated compat)'
           new='| ' + ' | '.join(parts[1:-1]) + ' |'
           p.write_text(s.replace(row,new))
