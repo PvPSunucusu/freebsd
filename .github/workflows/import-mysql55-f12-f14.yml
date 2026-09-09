@@ -1,0 +1,233 @@
+name: Import MySQL 5.5 for FreeBSD 12-14
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mysql55-56-freebsd12-14
+    paths:
+      - '.github/workflows/import-mysql55-f12-f14.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - freebsd: '12.4'
+            major: '12'
+            readline_url: 'https://pkg.net.isc.upenn.edu/FreeBSD%3A12%3Aamd64%3Alab/All/readline-8.1.2.pkg'
+            readline_file: 'readline-8.1.2.pkg'
+          - freebsd: '13.4'
+            major: '13'
+            readline_url: 'https://raw.githubusercontent.com/PvPSunucusu/freebsd/mysql55-56-freebsd12-14/FreeBSD%3A13%3Aamd64/latest/All/readline-8.1.2.pkg'
+            readline_file: 'readline-8.1.2.pkg'
+          - freebsd: '14.3'
+            major: '14'
+            readline_url: 'https://raw.githubusercontent.com/PvPSunucusu/freebsd/mysql55-56-freebsd12-14/FreeBSD%3A14%3Aamd64/latest/All/readline-8.2.10.pkg'
+            readline_file: 'readline-8.2.10.pkg'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download MySQL 5.5 source pair and target readline
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p .mysql55/source .mysql55/out
+          base='https://raw.githubusercontent.com/PvPSunucusu/freebsd/main/FreeBSD%3A11%3Aamd64/latest/All'
+          curl -fL --retry 3 "$base/mysql55-client-5.5.62_3.pkg" -o .mysql55/source/mysql55-client-5.5.62_3.pkg
+          curl -fL --retry 3 "$base/mysql55-server-5.5.62_3.pkg" -o .mysql55/source/mysql55-server-5.5.62_3.pkg
+          echo 'b3ea238e206c49ce55dddc4aa90b86d1ec32720ef6f03057b6563c6475801b96  .mysql55/source/mysql55-client-5.5.62_3.pkg' | sha256sum -c -
+          echo '58536cb884012dc28552b0551882f99d1bf132107f8fbcadb2593097862595e0  .mysql55/source/mysql55-server-5.5.62_3.pkg' | sha256sum -c -
+          curl -fL --retry 3 '${{ matrix.readline_url }}' -o '.mysql55/source/${{ matrix.readline_file }}'
+          sha256sum '.mysql55/source/${{ matrix.readline_file }}' | tee .mysql55/readline.sha256
+
+      - name: Repackage and runtime-test on FreeBSD ${{ matrix.freebsd }}
+        uses: cross-platform-actions/action@24ef01df165c76df1ed2b9f9e9212e78dc2fc963
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: ${{ matrix.freebsd }}
+          shell: sh
+          run: |
+            set -eux
+            ROOT="$GITHUB_WORKSPACE/.mysql55"
+            SRC="$ROOT/source"
+            OUT="$ROOT/out"
+            rm -rf "$OUT" "$ROOT/stage-client" "$ROOT/stage-server"
+            mkdir -p "$OUT" "$ROOT/stage-client" "$ROOT/stage-server"
+
+            freebsd-version
+            uname -a
+            echo 'Target readline manifest:'
+            pkg info -F "$SRC/${{ matrix.readline_file }}" | grep -E '^(Name|Version|Architecture|ABI)' || true
+            pkg add -f "$SRC/${{ matrix.readline_file }}"
+            pkg info readline
+
+            repack_mysql() {
+              comp="$1"
+              src="$SRC/mysql55-${comp}-5.5.62_3.pkg"
+              stage="$ROOT/stage-${comp}"
+              manifest="$ROOT/mysql55-${comp}.manifest"
+              rm -rf "$stage" && mkdir -p "$stage"
+              tar -xf "$src" -C "$stage"
+              cp "$stage/+MANIFEST" "$manifest"
+              sed -i '' -E \
+                -e 's/"arch"[[:space:]]*:[[:space:]]*"freebsd:11:x86:64"/"arch":"freebsd:${{ matrix.major }}:x86:64"/' \
+                -e 's/"abi"[[:space:]]*:[[:space:]]*"FreeBSD:11:amd64"/"abi":"FreeBSD:${{ matrix.major }}:amd64"/' \
+                "$manifest"
+              find "$stage" -maxdepth 1 -type f -name '+*' -delete
+              pkg create -f tzst -M "$manifest" -r "$stage" -o "$OUT"
+            }
+            repack_mysql client
+            repack_mysql server
+
+            CLIENT=$(find "$OUT" -name 'mysql55-client-*.pkg' | head -n1)
+            SERVER=$(find "$OUT" -name 'mysql55-server-*.pkg' | head -n1)
+            test -n "$CLIENT" && test -n "$SERVER"
+            pkg info -F "$CLIENT" | grep -E '^(Name|Version|Architecture|ABI)' || true
+            pkg info -F "$SERVER" | grep -E '^(Name|Version|Architecture|ABI)' || true
+            pkg add -f "$CLIENT"
+            pkg add -f "$SERVER"
+            pkg info mysql55-client mysql55-server
+            mysql --version
+            MYSQLD=$(find /usr/local -type f -name mysqld 2>/dev/null | head -n1)
+            test -n "$MYSQLD"
+            "$MYSQLD" --version
+            if ldd "$MYSQLD" | grep -q 'not found'; then ldd "$MYSQLD"; exit 1; fi
+            ldd "$MYSQLD"
+            echo "MySQL 5.5.62_3 target package runtime OK on FreeBSD ${{ matrix.major }}"
+
+      - name: Preserve packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql55-f${{ matrix.major }}
+          path: |
+            .mysql55/out/*.pkg
+            .mysql55/source/${{ matrix.readline_file }}
+            .mysql55/readline.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  import:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download validated packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mysql55-f*
+          path: .mysql55-artifacts
+
+      - name: Install package archive reader
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools
+
+      - name: Replace FreeBSD 12 readline with compatible same-ABI build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          F12='.mysql55-artifacts/mysql55-f12'
+          test -f "$F12/readline-8.1.2.pkg"
+          bsdtar -xOf "$F12/readline-8.1.2.pkg" +COMPACT_MANIFEST | grep -q 'FreeBSD:12:amd64'
+          python3 - <<'PY'
+          import io,json,tarfile
+          from pathlib import Path
+          repo=Path('FreeBSD:12:amd64/latest')
+          site=repo/'packagesite.txz'
+          with tarfile.open(site,'r:xz') as tf:
+              m=next(x for x in tf.getmembers() if x.name.endswith('packagesite.yaml'))
+              rows=[json.loads(x) for x in tf.extractfile(m).read().decode().splitlines() if x.strip()]
+          rows=[x for x in rows if x.get('name')!='readline']
+          payload=''.join(json.dumps(x,separators=(',',':'))+'\n' for x in sorted(rows,key=lambda x:x.get('name',''))).encode()
+          with tarfile.open(site,'w:xz',format=tarfile.PAX_FORMAT) as tf:
+              i=tarfile.TarInfo('packagesite.yaml'); i.size=len(payload); i.mode=0o644; i.mtime=0
+              tf.addfile(i,io.BytesIO(payload))
+          for p in (repo/'All').glob('readline-*'):
+              p.unlink()
+          sums=repo/'SHA256SUMS'
+          if sums.exists():
+              lines=[x for x in sums.read_text().splitlines() if '  All/readline-' not in x]
+              sums.write_text('\n'.join(lines)+'\n')
+          PY
+
+      - name: Strict-import MySQL 5.5 into FreeBSD 12-14 repositories
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for major in 12 13 14; do
+            src=".mysql55-artifacts/mysql55-f${major}"
+            python3 tools/import_package_closure.py \
+              --repo "FreeBSD:${major}:amd64/latest" \
+              --source-dir "$src" \
+              --root mysql55-client \
+              --root mysql55-server \
+              --provenance-out "DB_MYSQL55_F${major}_SOURCE.json"
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('DB_PACKAGE_MATRIX.md')
+          lines=p.read_text().splitlines()
+          out=[]
+          for line in lines:
+              if line.startswith(('| 12 |','| 13 |','| 14 |')):
+                  cells=[x.strip() for x in line.split('|')]
+                  cells[7]='✅ 5.5.62_3'
+                  line='| ' + ' | '.join(cells[1:-1]) + ' |'
+              out.append(line)
+          p.write_text('\n'.join(out)+'\n')
+          PY
+
+      - name: Verify all MySQL 5.5/5.6 roots and target ABIs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import json,tarfile
+          from pathlib import Path
+          for major in (11,12,13,14):
+              repo=Path(f'FreeBSD:{major}:amd64/latest')
+              with tarfile.open(repo/'packagesite.txz','r:xz') as tf:
+                  m=next(x for x in tf.getmembers() if x.name.endswith('packagesite.yaml'))
+                  rows=[json.loads(x) for x in tf.extractfile(m).read().decode().splitlines() if x.strip()]
+              by={x['name']:x for x in rows}
+              required={'mysql55-client','mysql55-server','mysql56-client','mysql56-server'}
+              missing=required-set(by)
+              assert not missing,(major,missing)
+              assert len(by)==len(rows),(major,'duplicate package names')
+              for n in required:
+                  obj=by[n]
+                  blob=(str(obj.get('arch',''))+' '+str(obj.get('abi',''))).lower()
+                  assert f'freebsd:{major}:' in blob,(major,n,obj.get('arch'),obj.get('abi'))
+              print(f'FreeBSD {major}: MySQL 5.5 + 5.6 catalogue/ABI OK')
+          PY
+
+      - name: Commit validated MySQL 5.5 packages
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name 'PvPSunucusu repo bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add DB_PACKAGE_MATRIX.md DB_MYSQL55_F12_SOURCE.json DB_MYSQL55_F13_SOURCE.json DB_MYSQL55_F14_SOURCE.json
+          for major in 12 13 14; do
+            git add "FreeBSD:${major}:amd64/latest/packagesite.txz" "FreeBSD:${major}:amd64/latest/SHA256SUMS"
+            find "FreeBSD:${major}:amd64/latest/All" -maxdepth 1 -type f \( -name 'mysql55-client-5.5.62_3.pkg' -o -name 'mysql55-server-5.5.62_3.pkg' -o -name 'readline-8.1.2.pkg' \) -print0 | xargs -0 -r git add --
+          done
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Add runtime-validated MySQL 5.5.62_3 for FreeBSD 12-14 [skip ci]'
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin HEAD:"$GITHUB_REF_NAME"
