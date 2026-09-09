@@ -1,0 +1,37 @@
+[
+  {
+    "major": 13,
+    "name": "mysql56-client",
+    "version": "5.6.51",
+    "filename": "mysql56-client-5.6.51.pkg",
+    "sha256": "5714b7bd018b0f19dc6dd7ce334917204a1a5476bcb99f2a2f695d6687c36c24",
+    "size": 1453144,
+    "arch": "freebsd:13:x86:64",
+    "abi": "FreeBSD:13:amd64",
+    "deps": [
+      "groff",
+      "libedit",
+      "libevent",
+      "liblz4",
+      "perl5"
+    ]
+  },
+  {
+    "major": 13,
+    "name": "mysql56-server",
+    "version": "5.6.51",
+    "filename": "mysql56-server-5.6.51.pkg",
+    "sha256": "a721636c3a1a8aca9ae5134aee72a2eb7c346cd0f4f78e44a620e115b350ea9e",
+    "size": 8326444,
+    "arch": "freebsd:13:x86:64",
+    "abi": "FreeBSD:13:amd64",
+    "deps": [
+      "groff",
+      "libedit",
+      "libevent",
+      "liblz4",
+      "mysql56-client",
+      "perl5"
+    ]
+  }
+]
