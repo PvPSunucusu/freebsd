@@ -31,27 +31,37 @@ jobs:
           done
           test -n "$ok"
           echo "SOURCE=$ok"
-          echo '--- script ---'
-          sed -n '1,260p' /tmp/probe/mysql56_by_helpdev.sh
-          echo '--- urls in script ---'
+          echo '--- relevant script lines ---'
+          grep -nEi 'BASE_URL|mysql56|libssl|libcrypto|fetch[[:space:]]|curl[[:space:]]|ARCH_TYPE' /tmp/probe/mysql56_by_helpdev.sh || true
+          echo '--- all urls in script ---'
           grep -Eo 'https?://[^"[:space:]'"'"']+' /tmp/probe/mysql56_by_helpdev.sh | sort -u || true
 
-      - name: Probe likely direct package URLs
+      - name: Probe candidate package paths
         shell: bash
         run: |
           set -euxo pipefail
           bases=(
             'http://kamil2321.ovh/mysql'
-            'https://kamil2321.ovh/mysql'
+            'http://kamil2321.ovh/mysql/x64'
+            'http://kamil2321.ovh/mysql/x86_64'
+            'http://kamil2321.ovh/mysql/64'
             'http://kamil2321.ovh/mysql/64bit'
-            'https://kamil2321.ovh/mysql/64bit'
             'http://kamil2321.ovh/mysql/amd64'
-            'https://kamil2321.ovh/mysql/amd64'
+            'http://kamil2321.ovh/mysql/pkg_backup_64'
+            'http://kamil2321.ovh/mysql/packages/x64'
+            'http://kamil2321.ovh/mysql/pakiety/x64'
           )
-          for name in mysql56-client-5.6.51.pkg mysql56-server-5.6.51.pkg libcrypto_so_111.tgz libssl_so_111.tgz; do
+          names=(
+            'mysql56-client-5.6.51.pkg'
+            'mysql56-server-5.6.51.pkg'
+            'libcrypto_so_111.tgz'
+            'libssl_so_111.tgz'
+            'libs_64bit_mysql.tgz'
+          )
+          for name in "${names[@]}"; do
             for base in "${bases[@]}"; do
               u="$base/$name"
               code=$(curl -L -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 25 "$u" || true)
-              echo "$code $u"
+              if [ "$code" != 404 ]; then echo "$code $u"; fi
             done
           done
