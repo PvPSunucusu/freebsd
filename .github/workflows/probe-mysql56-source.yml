@@ -1,0 +1,27 @@
+name: Probe MySQL56 legacy source
+
+on:
+  push:
+    branches:
+      - db-matrix-freebsd11-14
+    paths:
+      - '.github/workflows/probe-mysql56-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch installer without executing it
+        run: |
+          set -euxo pipefail
+          curl -fL --connect-timeout 15 --max-time 60 -o /tmp/mysql56_by_helpdev.sh http://kamil2321.ovh/mysql/mysql56_by_helpdev.sh
+          echo '--- SCRIPT START ---'
+          sed -n '1,260p' /tmp/mysql56_by_helpdev.sh
+          echo '--- SCRIPT END ---'
+          echo '--- URLS ---'
+          grep -Eo 'https?://[^"[:space:]<>]+' /tmp/mysql56_by_helpdev.sh | sort -u || true
