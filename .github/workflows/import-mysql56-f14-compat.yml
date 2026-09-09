@@ -1,0 +1,157 @@
+name: Import MySQL 5.6 compatibility package for FreeBSD 14
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mysql55-56-freebsd12-14
+    paths:
+      - '.github/workflows/import-mysql56-f14-compat.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download checksum-pinned upstream compatibility bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p .mysql56-f14/source .mysql56-f14/out
+          base='http://kamil2321.ovh/mysql/x64'
+          for f in mysql56-client-5.6.51.pkg mysql56-server-5.6.51.pkg libcrypto_so_111.tgz libssl_so_111.tgz; do
+            curl -fL --retry 3 "$base/$f" -o ".mysql56-f14/source/$f"
+          done
+          echo '5714b7bd018b0f19dc6dd7ce334917204a1a5476bcb99f2a2f695d6687c36c24  .mysql56-f14/source/mysql56-client-5.6.51.pkg' | sha256sum -c -
+          echo 'a721636c3a1a8aca9ae5134aee72a2eb7c346cd0f4f78e44a620e115b350ea9e  .mysql56-f14/source/mysql56-server-5.6.51.pkg' | sha256sum -c -
+          echo '890fcb62f55d9eef26ea2912a79b81c6b303ca1e843d9d88b0d63a0b572dfd4e  .mysql56-f14/source/libcrypto_so_111.tgz' | sha256sum -c -
+          echo 'ff389607d601cb8487fb9e8f987febbee9a435ba75a5427fd5e75748dadc2f05  .mysql56-f14/source/libssl_so_111.tgz' | sha256sum -c -
+
+      - name: Repackage and runtime-test on FreeBSD 14.3
+        uses: cross-platform-actions/action@24ef01df165c76df1ed2b9f9e9212e78dc2fc963
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: '14.3'
+          shell: sh
+          run: |
+            set -eux
+            ROOT="$GITHUB_WORKSPACE/.mysql56-f14"
+            SRC="$ROOT/source"
+            OUT="$ROOT/out"
+            rm -rf "$OUT" "$ROOT/stage-client" "$ROOT/stage-server" "$ROOT/stage-compat" "$ROOT/meta-compat"
+            mkdir -p "$OUT" "$ROOT/stage-client" "$ROOT/stage-server" "$ROOT/stage-compat" "$ROOT/meta-compat"
+
+            sudo env ASSUME_ALWAYS_YES=yes pkg update -f
+            sudo env ASSUME_ALWAYS_YES=yes pkg install -y jq
+
+            # Turn the two OpenSSL 1.1 runtime archives used by the proven F14
+            # installation into an ordinary FreeBSD:14 pkg dependency.
+            tar -xzf "$SRC/libcrypto_so_111.tgz" -C "$ROOT/stage-compat"
+            tar -xzf "$SRC/libssl_so_111.tgz" -C "$ROOT/stage-compat"
+            cat > "$ROOT/meta-compat/+MANIFEST" <<'EOF'
+            name: mysql56-openssl111-compat
+            version: 1.0
+            origin: misc/mysql56-openssl111-compat
+            comment: OpenSSL 1.1 runtime compatibility libraries for legacy MySQL 5.6
+            desc: OpenSSL 1.1 shared libraries required by the validated legacy MySQL 5.6.51 compatibility build on FreeBSD 14.
+            maintainer: mail@pvpsunucusu.com
+            www: https://github.com/PvPSunucusu/freebsd
+            prefix: /
+            arch: freebsd:14:x86:64
+            abi: FreeBSD:14:amd64
+            EOF
+            (cd "$ROOT/stage-compat" && find . \( -type f -o -type l \) -print | sed 's#^\./##' | sort > "$ROOT/compat.plist")
+            pkg create -f tzst -m "$ROOT/meta-compat" -p "$ROOT/compat.plist" -r "$ROOT/stage-compat" -o "$OUT"
+
+            repack_mysql() {
+              comp="$1"
+              src="$SRC/mysql56-${comp}-5.6.51.pkg"
+              stage="$ROOT/stage-${comp}"
+              rm -rf "$stage" && mkdir -p "$stage"
+              tar -xf "$src" -C "$stage"
+              jq '.arch="freebsd:14:x86:64" |
+                  .abi="FreeBSD:14:amd64" |
+                  .deps["mysql56-openssl111-compat"]={"origin":"misc/mysql56-openssl111-compat","version":"1.0"}' \
+                "$stage/+MANIFEST" > "$ROOT/mysql56-${comp}.manifest"
+              pkg create -f tzst -M "$ROOT/mysql56-${comp}.manifest" -r "$stage" -o "$OUT"
+            }
+            repack_mysql client
+            repack_mysql server
+
+            ls -lah "$OUT"
+            for f in "$OUT"/*.pkg; do
+              echo "===== $f ====="
+              pkg info -F "$f" | grep -E '^(Name|Version|Architecture|ABI)' || true
+            done
+
+            COMPAT=$(find "$OUT" -name 'mysql56-openssl111-compat-*.pkg' | head -n1)
+            CLIENT=$(find "$OUT" -name 'mysql56-client-*.pkg' | head -n1)
+            SERVER=$(find "$OUT" -name 'mysql56-server-*.pkg' | head -n1)
+            test -n "$COMPAT" && test -n "$CLIENT" && test -n "$SERVER"
+            sudo env ASSUME_ALWAYS_YES=yes pkg install -y "$COMPAT" "$CLIENT" "$SERVER"
+            pkg info mysql56-openssl111-compat mysql56-client mysql56-server
+            mysql --version
+            MYSQLD=$(find /usr/local -type f -name mysqld 2>/dev/null | head -n1)
+            test -n "$MYSQLD"
+            "$MYSQLD" --version
+            if ldd "$MYSQLD" | grep -q 'not found'; then ldd "$MYSQLD"; exit 1; fi
+            ldd "$MYSQLD"
+            echo 'FreeBSD 14 target-package runtime validation OK'
+
+      - name: Import target-ABI packages into static repository
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools
+          python3 tools/import_package_closure.py \
+            --repo 'FreeBSD:14:amd64/latest' \
+            --source-dir '.mysql56-f14/out' \
+            --root mysql56-client \
+            --root mysql56-server \
+            --provenance-out DB_MYSQL56_F14_COMPAT_SOURCE.json
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('DB_PACKAGE_MATRIX.md')
+          s=p.read_text()
+          row=next(x for x in s.splitlines() if x.startswith('| 14 |'))
+          parts=[x.strip() for x in row.split('|')]
+          # columns: blank,14,mdb114,mdb106,mdb105,mdb103,mysql56,mysql55,blank
+          parts[6]='✅ 5.6.51 (F14 runtime-validated compat)'
+          new='| ' + ' | '.join(parts[1:-1]) + ' |'
+          p.write_text(s.replace(row,new))
+          PY
+
+      - name: Verify catalogue and commit
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import json,tarfile
+          with tarfile.open('FreeBSD:14:amd64/latest/packagesite.txz','r:xz') as tf:
+              m=next(x for x in tf.getmembers() if x.name.endswith('packagesite.yaml'))
+              rows=[json.loads(x) for x in tf.extractfile(m).read().decode().splitlines() if x.strip()]
+          by={x['name']:x for x in rows}
+          for n in ('mysql56-client','mysql56-server','mysql56-openssl111-compat'):
+              assert n in by,n
+              assert 'FreeBSD:14:' in (str(by[n].get('abi',''))+' '+str(by[n].get('arch',''))),by[n]
+          assert len(by)==len(rows)
+          print('FreeBSD 14 MySQL 5.6 compatibility catalogue OK')
+          PY
+          git config user.name 'PvPSunucusu repo bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add DB_MYSQL56_F14_COMPAT_SOURCE.json DB_PACKAGE_MATRIX.md \
+            'FreeBSD:14:amd64/latest/packagesite.txz' 'FreeBSD:14:amd64/latest/SHA256SUMS'
+          find 'FreeBSD:14:amd64/latest/All' -maxdepth 1 -type f \( -name 'mysql56-client-5.6.51.pkg' -o -name 'mysql56-server-5.6.51.pkg' -o -name 'mysql56-openssl111-compat-*.pkg' \) -print0 | xargs -0 -r git add --
+          git commit -m 'Add runtime-validated MySQL 5.6.51 compatibility packages for FreeBSD 14 [skip ci]'
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin HEAD:"$GITHUB_REF_NAME"
