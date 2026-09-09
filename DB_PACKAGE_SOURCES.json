@@ -1,0 +1,6 @@
+{
+  "generated_by": "tools/sync_db_packages.py",
+  "policy": "same FreeBSD major ABI only; archive packages validated through +COMPACT_MANIFEST",
+  "packages": [],
+  "unresolved_dependencies": []
+}
