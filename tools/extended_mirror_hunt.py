@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Run mirror_hunt with the historical Nepustil tree layouts included.
-
-Nepustil keeps many archived package trees below hidden `.latest` / `.quarterly`
-directories.  The original hunter checked snapshot roots but not all of those
-layouts, which left valid same-ABI database packages undiscovered.
-"""
+"""Run mirror_hunt with historical layouts and full capped mirror indexes."""
 
 from pathlib import Path
 import sys
@@ -24,15 +19,12 @@ def candidate_urls(major: int):
         seen.add(url)
         return label, url
 
-    # Keep every source already known by mirror_hunt.
     for label, url in _original_candidate_urls(major):
         item = emit(label, url)
         if item:
             yield item
 
     abi = f"FreeBSD:{major}:amd64"
-
-    # Current Nepustil trees can also be exposed through hidden branch aliases.
     for branch in (".latest", "latest", ".quarterly", "quarterly"):
         item = emit(
             f"Nepustil current {branch}",
@@ -41,8 +33,6 @@ def candidate_urls(major: int):
         if item:
             yield item
 
-    # Historical snapshots.  This is the important missing layout: for example
-    # FreeBSD 11.2 packages live under /112/FreeBSD:11:amd64/.latest/All/.
     for snap in hunt.NEPUSTIL_SNAPSHOTS[major]:
         for branch in (".latest", "latest", ".quarterly", "quarterly"):
             item = emit(
@@ -53,5 +43,25 @@ def candidate_urls(major: int):
                 yield item
 
 
+def source_entries(base_url: str):
+    """Use packagesite only when the browsable listing is absent or capped.
+
+    SGGS historical All/ views commonly stop at exactly 10,000 entries.  The
+    packagesite catalogue is complete, so expand capped views from metadata.
+    For ordinary mirrors keep the faster HTML path to avoid downloading dozens
+    of multi-megabyte catalogues unnecessarily.
+    """
+    listing = hunt.html_index(base_url)
+    if not listing:
+        return hunt.metadata_index(base_url)
+    if len(listing) >= 9990:
+        metadata = hunt.metadata_index(base_url)
+        if metadata:
+            metadata.update({name: url for name, url in listing.items() if name not in metadata})
+            return metadata
+    return listing
+
+
 hunt.candidate_urls = candidate_urls
+hunt.source_entries = source_entries
 raise SystemExit(hunt.main())
