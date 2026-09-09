@@ -1,0 +1,81 @@
+name: Validate MySQL 5.6 on FreeBSD 13 and 14
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mysql55-56-freebsd12-14
+    paths:
+      - '.github/workflows/validate-mysql56-f13-f14.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download and inspect HelpDev x64 bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools jq
+          mkdir -p .mysql56-helpdev
+          base='http://kamil2321.ovh/mysql/x64'
+          for f in mysql56-client-5.6.51.pkg mysql56-server-5.6.51.pkg libcrypto_so_111.tgz libssl_so_111.tgz; do
+            curl -fL --retry 3 "$base/$f" -o ".mysql56-helpdev/$f"
+            sha256sum ".mysql56-helpdev/$f"
+          done
+          for f in .mysql56-helpdev/mysql56-*.pkg; do
+            echo "===== $f ====="
+            bsdtar -xOf "$f" +COMPACT_MANIFEST | tee "$f.manifest.json" | jq '{name,version,arch,abi,deps}'
+          done
+
+      - name: Test normal installation on FreeBSD 13.4
+        uses: cross-platform-actions/action@24ef01df165c76df1ed2b9f9e9212e78dc2fc963
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: '13.4'
+          shell: sh
+          run: |
+            set -eux
+            freebsd-version
+            uname -a
+            cd "$GITHUB_WORKSPACE/.mysql56-helpdev"
+            sudo tar -xzf libcrypto_so_111.tgz -C /
+            sudo tar -xzf libssl_so_111.tgz -C /
+            sudo env ASSUME_ALWAYS_YES=yes pkg install -y ./mysql56-client-5.6.51.pkg ./mysql56-server-5.6.51.pkg
+            pkg info mysql56-client mysql56-server
+            mysql --version
+            MYSQLD=$(command -v mysqld || find /usr/local -type f -name mysqld | head -n1)
+            test -n "$MYSQLD"
+            "$MYSQLD" --version
+            if ldd "$MYSQLD" | grep -q 'not found'; then ldd "$MYSQLD"; exit 1; fi
+            ldd "$MYSQLD"
+
+      - name: Test normal installation on FreeBSD 14.3
+        uses: cross-platform-actions/action@24ef01df165c76df1ed2b9f9e9212e78dc2fc963
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: '14.3'
+          shell: sh
+          run: |
+            set -eux
+            freebsd-version
+            uname -a
+            cd "$GITHUB_WORKSPACE/.mysql56-helpdev"
+            sudo tar -xzf libcrypto_so_111.tgz -C /
+            sudo tar -xzf libssl_so_111.tgz -C /
+            sudo env ASSUME_ALWAYS_YES=yes pkg install -y ./mysql56-client-5.6.51.pkg ./mysql56-server-5.6.51.pkg
+            pkg info mysql56-client mysql56-server
+            mysql --version
+            MYSQLD=$(command -v mysqld || find /usr/local -type f -name mysqld | head -n1)
+            test -n "$MYSQLD"
+            "$MYSQLD" --version
+            if ldd "$MYSQLD" | grep -q 'not found'; then ldd "$MYSQLD"; exit 1; fi
+            ldd "$MYSQLD"
