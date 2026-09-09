@@ -73,7 +73,6 @@ jobs:
           python3 - <<'PY'
           import json, tarfile
           from pathlib import Path
-
           for major in (11, 12, 13, 14):
               p = Path(f"FreeBSD:{major}:amd64/latest/packagesite.txz")
               with tarfile.open(p, "r:xz") as tf:
@@ -110,4 +109,5 @@ jobs:
           fi
 
           git commit -m "Sync legacy database packages for FreeBSD 11-14 [skip ci]"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin HEAD:${GITHUB_REF_NAME}
