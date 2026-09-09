@@ -1,0 +1,98 @@
+name: Import MySQL 5.6 - FreeBSD 13
+
+on:
+  push:
+    branches:
+      - db-matrix-freebsd11-14
+    paths:
+      - '.github/workflows/import-mysql56-f13.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: import-mysql56-f13-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository metadata
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.gitattributes
+            /tools/import_package_closure.py
+            /FreeBSD:13:amd64/latest/packagesite.txz
+            /FreeBSD:13:amd64/latest/SHA256SUMS
+
+      - name: Download and verify native FreeBSD 13 MySQL 5.6 packages
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools
+          SRC='.legacy-build/mysql56-f13'
+          mkdir -p "$SRC"
+          curl -fL --connect-timeout 15 --max-time 180 \
+            -o "$SRC/mysql56-client-5.6.51.pkg" \
+            'http://kamil2321.ovh/mysql/x64/mysql56-client-5.6.51.pkg'
+          curl -fL --connect-timeout 15 --max-time 180 \
+            -o "$SRC/mysql56-server-5.6.51.pkg" \
+            'http://kamil2321.ovh/mysql/x64/mysql56-server-5.6.51.pkg'
+          echo '5714b7bd018b0f19dc6dd7ce334917204a1a5476bcb99f2a2f695d6687c36c24  .legacy-build/mysql56-f13/mysql56-client-5.6.51.pkg' | sha256sum -c -
+          echo 'a721636c3a1a8aca9ae5134aee72a2eb7c346cd0f4f78e44a620e115b350ea9e  .legacy-build/mysql56-f13/mysql56-server-5.6.51.pkg' | sha256sum -c -
+          for f in "$SRC"/*.pkg; do
+            bsdtar -xOf "$f" +COMPACT_MANIFEST | grep -q '"abi":"FreeBSD:13:amd64"'
+            bsdtar -xOf "$f" +COMPACT_MANIFEST | grep -q '"arch":"freebsd:13:x86:64"'
+          done
+
+      - name: Import MySQL 5.6 roots into FreeBSD 13 repository
+        run: |
+          set -euxo pipefail
+          python3 tools/import_package_closure.py \
+            --repo 'FreeBSD:13:amd64/latest' \
+            --source-dir '.legacy-build/mysql56-f13' \
+            --root mysql56-client \
+            --root mysql56-server \
+            --provenance-out 'DB_MYSQL56_F13_SOURCE.json'
+
+      - name: Validate catalogue
+        run: |
+          python3 - <<'PY'
+          import json, tarfile
+          p='FreeBSD:13:amd64/latest/packagesite.txz'
+          with tarfile.open(p, 'r:xz') as tf:
+              m=next(x for x in tf.getmembers() if x.name.endswith('packagesite.yaml'))
+              rows=[json.loads(x) for x in tf.extractfile(m).read().decode().splitlines() if x.strip()]
+          by={x['name']:x for x in rows}
+          for name in ('mysql56-client','mysql56-server'):
+              assert name in by, name
+              blob=(str(by[name].get('arch',''))+' '+str(by[name].get('abi',''))).lower()
+              assert 'freebsd:13:' in blob, (name, blob)
+          assert len(by)==len(rows), 'duplicate package names'
+          print('FreeBSD 13 MySQL 5.6 catalogue OK')
+          PY
+
+      - name: Commit native FreeBSD 13 MySQL 5.6 packages
+        run: |
+          set -euxo pipefail
+          git config user.name 'PvPSunucusu repo bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add --sparse DB_MYSQL56_F13_SOURCE.json \
+            'FreeBSD:13:amd64/latest/packagesite.txz' \
+            'FreeBSD:13:amd64/latest/SHA256SUMS' \
+            'FreeBSD:13:amd64/latest/All/mysql56-client-5.6.51.pkg' \
+            'FreeBSD:13:amd64/latest/All/mysql56-server-5.6.51.pkg'
+          if git diff --cached --quiet; then
+            echo 'No changes required.'
+            exit 0
+          fi
+          git commit -m 'Add native MySQL 5.6 packages for FreeBSD 13 [skip ci]'
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin HEAD:"${GITHUB_REF_NAME}"
