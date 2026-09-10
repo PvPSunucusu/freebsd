@@ -5,6 +5,7 @@ REPO_ROOT="${REPO_ROOT:-$PWD}"
 WORK="/tmp/pvps-f14-mariadb103"
 PORTS="$WORK/ports"
 DISTDIR="$WORK/distfiles"
+OPENSSL_PREFIX="$WORK/openssl111"
 OUT="$REPO_ROOT/.legacy-build/14/mariadb103/all"
 REPACK="$WORK/repacked"
 PORTS_COMMIT="ff82663b674567c432167b1d3c78c1a4da1d20ed"
@@ -39,18 +40,32 @@ fetch --no-verify-peer -o "$DISTDIR/mariadb-10.3.38.tar.gz" \
 verify_sha256 "$DISTDIR/mariadb-10.3.38.tar.gz" \
   "4afbeff86d996475bb2324db9845c0746ea6e128c129b86a4a0163e4dc93293c"
 
-# MariaDB 10.3 does not support OpenSSL 3. Build it against the last 1.1.1
-# ports dependency, then replace that runtime dependency with the already
-# runtime-validated FreeBSD 14 OpenSSL 1.1 compatibility package in this repo.
-if ! fetch --no-verify-peer -o "$DISTDIR/openssl-1.1.1t.tar.gz" \
+# MariaDB 10.3 only supports OpenSSL <= 1.1.x. Build a checksum-pinned
+# OpenSSL 1.1.1t toolchain in an isolated temporary prefix. This avoids the
+# removed/EOL security/openssl port and avoids polluting /usr/local.
+if ! fetch --no-verify-peer -o "$WORK/openssl-1.1.1t.tar.gz" \
   "https://www.openssl.org/source/old/1.1.1/openssl-1.1.1t.tar.gz"; then
-  fetch --no-verify-peer -o "$DISTDIR/openssl-1.1.1t.tar.gz" \
+  fetch --no-verify-peer -o "$WORK/openssl-1.1.1t.tar.gz" \
     "https://ftp.openssl.org/source/old/1.1.1/openssl-1.1.1t.tar.gz"
 fi
-verify_sha256 "$DISTDIR/openssl-1.1.1t.tar.gz" \
+verify_sha256 "$WORK/openssl-1.1.1t.tar.gz" \
   "8dee9b24bdb1dcbf0c3d1e9b02fb8f6bf22165e807f45adeb7c9677536859d3b"
+mkdir -p "$WORK/openssl-src"
+tar -xzf "$WORK/openssl-1.1.1t.tar.gz" -C "$WORK/openssl-src" --strip-components=1
+(
+  cd "$WORK/openssl-src"
+  ./config --prefix="$OPENSSL_PREFIX" --openssldir="$OPENSSL_PREFIX/ssl" shared no-tests
+  gmake -j2
+  gmake install_sw
+)
+test -f "$OPENSSL_PREFIX/include/openssl/ssl.h"
+test -f "$OPENSSL_PREFIX/lib/libssl.so.111"
+test -f "$OPENSSL_PREFIX/lib/libcrypto.so.111"
 
 mf="$PORTS/databases/mariadb103-server/Makefile"
+# Drop the ports-framework SSL dependency and point CMake directly at the
+# isolated 1.1.1 build. The final package is repacked to depend on the
+# repository's already runtime-validated OpenSSL 1.1 compatibility package.
 sed -i '' \
   -e '/^[[:space:]]*DEPRECATED[?+:]*=/d' \
   -e '/^[[:space:]]*EXPIRATION_DATE[?+:]*=/d' \
@@ -58,7 +73,17 @@ sed -i '' \
   -e '/^[[:space:]]*IGNORE_SSL_REASON[?+:]*=/d' \
   -e '/^[[:space:]]*BROKEN_FreeBSD_14[?+:]*=/d' \
   -e '/^[[:space:]]*IGNORE_FreeBSD_14[?+:]*=/d' \
+  -e 's/[[:space:]]ssl[[:space:]]*$//' \
   "$mf"
+sed -i '' \
+  -e "s|-DWITH_SSL=\"\${OPENSSLBASE}\"|-DWITH_SSL=$OPENSSL_PREFIX|g" \
+  "$mf"
+
+grep -q -- "-DWITH_SSL=$OPENSSL_PREFIX" "$mf"
+if grep -Eq '^[[:space:]]*USES=.*[[:space:]]ssl([[:space:]]|$)' "$mf"; then
+  echo 'ports SSL dependency was not removed' >&2
+  exit 1
+fi
 
 client="$PORTS/databases/mariadb103-client"
 server="$PORTS/databases/mariadb103-server"
@@ -72,7 +97,7 @@ options_unset="GSSAPI_BASE GSSAPI_HEIMDAL GSSAPI_MIT ARCHIVE BLACKHOLE EXAMPLE F
 
 build_port() {
   port="$1"
-  env $common DISTDIR="$DISTDIR" DEFAULT_VERSIONS="mysql=103m ssl=openssl" \
+  env $common DISTDIR="$DISTDIR" DEFAULT_VERSIONS="mysql=103m" \
     OPTIONS_SET="$options_set" OPTIONS_UNSET="$options_unset" \
     CFLAGS="$cflags" CXXFLAGS="$cxxflags" \
     make -C "$port" clean package install
@@ -113,9 +138,9 @@ CLIENT="$(find "$OUT" -maxdepth 1 -type f -name 'mariadb103-client-*.pkg' -print
 SERVER="$(find "$OUT" -maxdepth 1 -type f -name 'mariadb103-server-*.pkg' -print | head -n 1)"
 test -f "$COMPAT" && test -n "$CLIENT" && test -n "$SERVER"
 
-# Prove that the repacked database no longer needs the old security/openssl
-# package and runs with the repository's FreeBSD 14 OpenSSL 1.1 compatibility
-# runtime instead.
+# Remove the temporary compiler toolchain before runtime testing. Success from
+# this point proves the database uses only the repository compatibility pkg.
+rm -rf "$OPENSSL_PREFIX"
 ASSUME_ALWAYS_YES=yes pkg delete -fy mariadb103-server mariadb103-client openssl >/dev/null 2>&1 || true
 ASSUME_ALWAYS_YES=yes pkg install -y "$COMPAT" "$CLIENT" "$SERVER"
 pkg info mysql56-openssl111-compat mariadb103-client mariadb103-server
