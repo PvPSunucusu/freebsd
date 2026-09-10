@@ -1,0 +1,47 @@
+[
+  {
+    "major": 14,
+    "name": "mariadb103-client",
+    "version": "10.3.38",
+    "filename": "mariadb103-client-10.3.38.pkg",
+    "sha256": "7227ce301fc5dd4277da3983064191a26952e67e1c070269e26a14355e57222a",
+    "size": 1975359,
+    "arch": "freebsd:14:x86:64",
+    "abi": "FreeBSD:14:amd64",
+    "deps": [
+      "libedit",
+      "libiconv",
+      "mysql56-openssl111-compat",
+      "ncurses",
+      "readline"
+    ]
+  },
+  {
+    "major": 14,
+    "name": "mariadb103-server",
+    "version": "10.3.38",
+    "filename": "mariadb103-server-10.3.38.pkg",
+    "sha256": "5539eb84aadf46f58cbb212749b3dde99a9be30b6ccc83d4727293fe16722c6b",
+    "size": 33777063,
+    "arch": "freebsd:14:x86:64",
+    "abi": "FreeBSD:14:amd64",
+    "deps": [
+      "libedit",
+      "libiconv",
+      "mariadb103-client",
+      "mysql56-openssl111-compat",
+      "ncurses"
+    ]
+  },
+  {
+    "major": 14,
+    "name": "ncurses",
+    "version": "6.6",
+    "filename": "ncurses-6.6.pkg",
+    "sha256": "902015f38c3b44e551fdf75cf1b9425e8d439909cf8e3d609559286ba11b7fd6",
+    "size": 1335550,
+    "arch": "freebsd:14:x86:64",
+    "abi": "FreeBSD:14:amd64",
+    "deps": []
+  }
+]
