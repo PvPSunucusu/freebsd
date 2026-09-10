@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: mariadb103-f14-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-import:
