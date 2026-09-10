@@ -40,7 +40,7 @@ fetch --no-verify-peer -o "$DISTDIR/mariadb-10.3.38.tar.gz" \
 verify_sha256 "$DISTDIR/mariadb-10.3.38.tar.gz" \
   "4afbeff86d996475bb2324db9845c0746ea6e128c129b86a4a0163e4dc93293c"
 
-# MariaDB 10.3 supports OpenSSL only up to 1.1.x.  Build a checksum-pinned
+# MariaDB 10.3 supports OpenSSL only up to 1.1.x. Build a checksum-pinned
 # OpenSSL 1.1.1t toolchain in a private prefix instead of asking the old ports
 # tree to install the EOL security/openssl port on FreeBSD 14.
 if ! fetch --no-verify-peer -o "$WORK/openssl-1.1.1t.tar.gz" \
@@ -58,6 +58,18 @@ tar -xzf "$WORK/openssl-1.1.1t.tar.gz" -C "$WORK/openssl-src" --strip-components
     --prefix="$OPENSSL_PREFIX" \
     --openssldir="$OPENSSL_PREFIX/ssl" \
     shared no-tests
+
+  # Upstream OpenSSL emits libssl.so.1.1/libcrypto.so.1.1. FreeBSD's 1.1
+  # port intentionally used SONAME 111. The repository compatibility package
+  # provides libssl.so.111/libcrypto.so.111, so build with the same SONAME.
+  sed -i '' \
+    -e 's/SHLIB_VERSION_NUMBER=1\.1/SHLIB_VERSION_NUMBER=111/g' \
+    Makefile
+  sed -i '' \
+    -e 's/SHLIB_VERSION_NUMBER "1\.1"/SHLIB_VERSION_NUMBER "111"/g' \
+    include/openssl/opensslv.h
+  grep -q 'SHLIB_VERSION_NUMBER=111' Makefile
+
   gmake -j2
   gmake install_sw
 )
@@ -67,7 +79,7 @@ test -f "$OPENSSL_PREFIX/lib/libcrypto.so.111"
 
 mf="$PORTS/databases/mariadb103-server/Makefile"
 # Remove the ports-framework SSL provider and make CMake use only the private
-# build-time OpenSSL prefix.  The produced packages are later repacked to use
+# build-time OpenSSL prefix. The produced packages are later repacked to use
 # the repository's validated FreeBSD 14 OpenSSL 1.1 compatibility package.
 sed -i '' \
   -e '/^[[:space:]]*DEPRECATED[?+:]*=/d' \
@@ -94,7 +106,7 @@ test -d "$client" && test -d "$server"
 common="BATCH=yes DISABLE_VULNERABILITIES=yes ALLOW_UNSUPPORTED_SYSTEM=yes NO_IGNORE=yes TRYBROKEN=yes MAKE_JOBS_UNSAFE=yes"
 cflags="-O2 -pipe -fcommon -fno-strict-aliasing -Wno-error -I$OPENSSL_PREFIX/include"
 cxxflags="-O2 -pipe -fcommon -fno-strict-aliasing -std=gnu++11 -Wno-error -Wno-deprecated-declarations -Wno-error=deprecated-declarations -I$OPENSSL_PREFIX/include"
-ldflags="-L$OPENSSL_PREFIX/lib -Wl,-rpath,$OPENSSL_PREFIX/lib"
+ldflags="-L$OPENSSL_PREFIX/lib"
 options_set="GSSAPI_NONE"
 options_unset="GSSAPI_BASE GSSAPI_HEIMDAL GSSAPI_MIT ARCHIVE BLACKHOLE EXAMPLE FEDERATED AWS_KEY_MGMT CONNECT_EXTRA HASHICORP_VAULT COLUMNSTORE MROONGA OQGRAPH ROCKSDB S3 SPHINX SPIDER WSREP LZ4 LZO SNAPPY ZSTD ZMQ MSGPACK TOKUDB"
 
