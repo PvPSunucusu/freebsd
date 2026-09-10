@@ -1,0 +1,124 @@
+name: Build FreeBSD 14 MariaDB 10.3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - f14-mariadb103-final
+    paths:
+      - '.github/workflows/build-mariadb103-f14.yml'
+      - 'tools/build_mariadb103_f14.sh'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mariadb103-f14-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-import:
+    name: Build, runtime-test and import mariadb103
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout required repository files
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.gitattributes
+            /DB_PACKAGE_MATRIX.md
+            /FreeBSD:14:amd64/latest/packagesite.txz
+            /FreeBSD:14:amd64/latest/SHA256SUMS
+            /FreeBSD:14:amd64/latest/All/mysql56-openssl111-compat-1.0.pkg
+            /tools/build_mariadb103_f14.sh
+            /tools/import_package_closure.py
+
+      - name: Build and runtime-test MariaDB 10.3 on FreeBSD 14
+        uses: cross-platform-actions/action@24ef01df165c76df1ed2b9f9e9212e78dc2fc963
+        with:
+          operating_system: freebsd
+          architecture: x86-64
+          version: '14.0'
+          shell: sh
+          run: |
+            set -eux
+            sudo env REPO_ROOT="$PWD" sh tools/build_mariadb103_f14.sh
+
+      - name: Verify built roots
+        run: |
+          set -eux
+          test -n "$(find '.legacy-build/14/mariadb103/all' -maxdepth 1 -type f -name 'mariadb103-client-*' -print -quit)"
+          test -n "$(find '.legacy-build/14/mariadb103/all' -maxdepth 1 -type f -name 'mariadb103-server-*' -print -quit)"
+
+      - name: Install package archive reader
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libarchive-tools xz-utils
+
+      - name: Import MariaDB 10.3 runtime closure
+        run: |
+          set -eux
+          python3 tools/import_package_closure.py \
+            --repo 'FreeBSD:14:amd64/latest' \
+            --source-dir '.legacy-build/14/mariadb103/all' \
+            --root mariadb103-client \
+            --root mariadb103-server \
+            --provenance-out DB_MARIADB103_F14_SOURCE_BUILD.json
+
+      - name: Validate FreeBSD 14 ABI and compatibility dependency
+        run: |
+          python3 - <<'PY'
+          import json, tarfile
+          from pathlib import Path
+          repo=Path('FreeBSD:14:amd64/latest')
+          with tarfile.open(repo/'packagesite.txz','r:xz') as tf:
+              member=next(m for m in tf.getmembers() if m.name.endswith('packagesite.yaml'))
+              rows=[json.loads(x) for x in tf.extractfile(member).read().decode().splitlines() if x.strip()]
+          by={x['name']:x for x in rows}
+          for name in ('mariadb103-client','mariadb103-server','mysql56-openssl111-compat','mysql56-client','mysql56-server'):
+              if name not in by:
+                  raise SystemExit('missing from catalog: '+name)
+              abi=(str(by[name].get('abi',''))+' '+str(by[name].get('arch',''))).lower()
+              if 'freebsd:14:' not in abi:
+                  raise SystemExit(f'wrong ABI: {name}: {abi}')
+          for name in ('mariadb103-client','mariadb103-server'):
+              deps=by[name].get('deps') or {}
+              if 'openssl' in deps:
+                  raise SystemExit(name+' still depends on obsolete security/openssl')
+              if 'mysql56-openssl111-compat' not in deps:
+                  raise SystemExit(name+' missing validated OpenSSL 1.1 compatibility dependency')
+          if by['mariadb103-client'].get('version') != '10.3.38' or by['mariadb103-server'].get('version') != '10.3.38':
+              raise SystemExit('unexpected MariaDB 10.3 version')
+          print('mariadb103:', by['mariadb103-client']['version'], '/', by['mariadb103-server']['version'])
+          PY
+
+      - name: Mark MariaDB 10.3 complete in matrix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('DB_PACKAGE_MATRIX.md')
+          text=p.read_text()
+          old='| 14 | ✅ 11.4.12 | ✅ 10.6.18 | ✅ 10.5.24 | ❌ same-ABI paket bulunamadi | ✅ 5.6.51 (F14 runtime-validated compat) | ❌ same-ABI paket bulunamadi |'
+          new='| 14 | ✅ 11.4.12 | ✅ 10.6.18 | ✅ 10.5.24 | ✅ 10.3.38 (F14 OpenSSL 1.1 compat) | ✅ 5.6.51 (F14 runtime-validated compat) | ❌ same-ABI paket bulunamadi |'
+          if old not in text and new not in text:
+              raise SystemExit('FreeBSD 14 matrix row is not the expected baseline')
+          p.write_text(text.replace(old,new))
+          PY
+
+      - name: Commit validated MariaDB 10.3 packages
+        run: |
+          set -eux
+          git config user.name 'PvPSunucusu repo bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add --sparse DB_MARIADB103_F14_SOURCE_BUILD.json DB_PACKAGE_MATRIX.md \
+            'FreeBSD:14:amd64/latest/packagesite.txz' \
+            'FreeBSD:14:amd64/latest/SHA256SUMS'
+          find 'FreeBSD:14:amd64/latest/All' -maxdepth 1 -type f -print0 | xargs -0 -r git add --sparse --
+          git diff --cached --quiet && exit 0
+          git commit -m 'Add validated FreeBSD 14 MariaDB 10.3 packages [skip ci]'
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin HEAD:"${GITHUB_REF_NAME}"
