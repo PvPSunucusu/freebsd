@@ -1,0 +1,50 @@
+[
+  {
+    "major": 14,
+    "name": "mysql56-client",
+    "version": "5.6.51",
+    "filename": "mysql56-client-5.6.51.pkg",
+    "sha256": "6dcaf1618fb4388081d6ff46f54ac88ba470ddcfc1e4a88ea6a1c3eef865e831",
+    "size": 1791862,
+    "arch": "freebsd:14:x86:64",
+    "abi": "FreeBSD:14:amd64",
+    "deps": [
+      "groff",
+      "libedit",
+      "libevent",
+      "liblz4",
+      "mysql56-openssl111-compat",
+      "perl5"
+    ]
+  },
+  {
+    "major": 14,
+    "name": "mysql56-server",
+    "version": "5.6.51",
+    "filename": "mysql56-server-5.6.51.pkg",
+    "sha256": "e1289b517981dc1713c799110ca8c10e359c88db0dc2767961d886131cbf6c41",
+    "size": 9497549,
+    "arch": "freebsd:14:x86:64",
+    "abi": "FreeBSD:14:amd64",
+    "deps": [
+      "groff",
+      "libedit",
+      "libevent",
+      "liblz4",
+      "mysql56-client",
+      "mysql56-openssl111-compat",
+      "perl5"
+    ]
+  },
+  {
+    "major": 14,
+    "name": "mysql56-openssl111-compat",
+    "version": "1.0",
+    "filename": "mysql56-openssl111-compat-1.0.pkg",
+    "sha256": "97937f81869a4a98d608fd40cc41b2ca0f05a18f4d1a16bddec442e7d51674a9",
+    "size": 1359947,
+    "arch": "freebsd:14:x86:64",
+    "abi": "FreeBSD:14:amd64",
+    "deps": []
+  }
+]
