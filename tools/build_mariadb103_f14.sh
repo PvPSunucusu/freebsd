@@ -40,9 +40,9 @@ fetch --no-verify-peer -o "$DISTDIR/mariadb-10.3.38.tar.gz" \
 verify_sha256 "$DISTDIR/mariadb-10.3.38.tar.gz" \
   "4afbeff86d996475bb2324db9845c0746ea6e128c129b86a4a0163e4dc93293c"
 
-# MariaDB 10.3 only supports OpenSSL <= 1.1.x. Build a checksum-pinned
-# OpenSSL 1.1.1t toolchain in an isolated temporary prefix. This avoids the
-# removed/EOL security/openssl port and avoids polluting /usr/local.
+# MariaDB 10.3 supports OpenSSL only up to 1.1.x.  Build a checksum-pinned
+# OpenSSL 1.1.1t toolchain in a private prefix instead of asking the old ports
+# tree to install the EOL security/openssl port on FreeBSD 14.
 if ! fetch --no-verify-peer -o "$WORK/openssl-1.1.1t.tar.gz" \
   "https://www.openssl.org/source/old/1.1.1/openssl-1.1.1t.tar.gz"; then
   fetch --no-verify-peer -o "$WORK/openssl-1.1.1t.tar.gz" \
@@ -54,7 +54,10 @@ mkdir -p "$WORK/openssl-src"
 tar -xzf "$WORK/openssl-1.1.1t.tar.gz" -C "$WORK/openssl-src" --strip-components=1
 (
   cd "$WORK/openssl-src"
-  ./config --prefix="$OPENSSL_PREFIX" --openssldir="$OPENSSL_PREFIX/ssl" shared no-tests
+  env PERL=/usr/local/bin/perl ./config \
+    --prefix="$OPENSSL_PREFIX" \
+    --openssldir="$OPENSSL_PREFIX/ssl" \
+    shared no-tests
   gmake -j2
   gmake install_sw
 )
@@ -63,9 +66,9 @@ test -f "$OPENSSL_PREFIX/lib/libssl.so.111"
 test -f "$OPENSSL_PREFIX/lib/libcrypto.so.111"
 
 mf="$PORTS/databases/mariadb103-server/Makefile"
-# Drop the ports-framework SSL dependency and point CMake directly at the
-# isolated 1.1.1 build. The final package is repacked to depend on the
-# repository's already runtime-validated OpenSSL 1.1 compatibility package.
+# Remove the ports-framework SSL provider and make CMake use only the private
+# build-time OpenSSL prefix.  The produced packages are later repacked to use
+# the repository's validated FreeBSD 14 OpenSSL 1.1 compatibility package.
 sed -i '' \
   -e '/^[[:space:]]*DEPRECATED[?+:]*=/d' \
   -e '/^[[:space:]]*EXPIRATION_DATE[?+:]*=/d' \
@@ -74,14 +77,13 @@ sed -i '' \
   -e '/^[[:space:]]*BROKEN_FreeBSD_14[?+:]*=/d' \
   -e '/^[[:space:]]*IGNORE_FreeBSD_14[?+:]*=/d' \
   -e 's/[[:space:]]ssl[[:space:]]*$//' \
-  "$mf"
-sed -i '' \
   -e "s|-DWITH_SSL=\"\${OPENSSLBASE}\"|-DWITH_SSL=$OPENSSL_PREFIX|g" \
   "$mf"
 
 grep -q -- "-DWITH_SSL=$OPENSSL_PREFIX" "$mf"
-if grep -Eq '^[[:space:]]*USES=.*[[:space:]]ssl([[:space:]]|$)' "$mf"; then
-  echo 'ports SSL dependency was not removed' >&2
+if grep -Eq '^[[:space:]]*USES=.*[[:space:]]ssl([[:space:]]|$)|OPENSSLBASE|IGNORE_SSL' "$mf"; then
+  echo 'historical ports SSL dependency was not fully removed' >&2
+  grep -En 'ssl|SSL|OPENSSL' "$mf" || true
   exit 1
 fi
 
@@ -90,16 +92,19 @@ server="$PORTS/databases/mariadb103-server"
 test -d "$client" && test -d "$server"
 
 common="BATCH=yes DISABLE_VULNERABILITIES=yes ALLOW_UNSUPPORTED_SYSTEM=yes NO_IGNORE=yes TRYBROKEN=yes MAKE_JOBS_UNSAFE=yes"
-cflags="-O2 -pipe -fcommon -fno-strict-aliasing -Wno-error"
-cxxflags="-O2 -pipe -fcommon -fno-strict-aliasing -std=gnu++11 -Wno-error -Wno-deprecated-declarations -Wno-error=deprecated-declarations"
+cflags="-O2 -pipe -fcommon -fno-strict-aliasing -Wno-error -I$OPENSSL_PREFIX/include"
+cxxflags="-O2 -pipe -fcommon -fno-strict-aliasing -std=gnu++11 -Wno-error -Wno-deprecated-declarations -Wno-error=deprecated-declarations -I$OPENSSL_PREFIX/include"
+ldflags="-L$OPENSSL_PREFIX/lib -Wl,-rpath,$OPENSSL_PREFIX/lib"
 options_set="GSSAPI_NONE"
-options_unset="GSSAPI_BASE GSSAPI_HEIMDAL GSSAPI_MIT ARCHIVE BLACKHOLE EXAMPLE FEDERATED AWS_KEY_MGMT CONNECT_EXTRA HASHICORP_VAULT COLUMNSTORE MROONGA OQGRAPH ROCKSDB S3 SPHINX SPIDER WSREP LZO SNAPPY ZMQ MSGPACK TOKUDB"
+options_unset="GSSAPI_BASE GSSAPI_HEIMDAL GSSAPI_MIT ARCHIVE BLACKHOLE EXAMPLE FEDERATED AWS_KEY_MGMT CONNECT_EXTRA HASHICORP_VAULT COLUMNSTORE MROONGA OQGRAPH ROCKSDB S3 SPHINX SPIDER WSREP LZ4 LZO SNAPPY ZSTD ZMQ MSGPACK TOKUDB"
 
 build_port() {
   port="$1"
   env $common DISTDIR="$DISTDIR" DEFAULT_VERSIONS="mysql=103m" \
     OPTIONS_SET="$options_set" OPTIONS_UNSET="$options_unset" \
-    CFLAGS="$cflags" CXXFLAGS="$cxxflags" \
+    CPPFLAGS="-I$OPENSSL_PREFIX/include" \
+    CFLAGS="$cflags" CXXFLAGS="$cxxflags" LDFLAGS="$ldflags" \
+    LD_LIBRARY_PATH="$OPENSSL_PREFIX/lib" \
     make -C "$port" clean package install
 }
 
@@ -138,10 +143,9 @@ CLIENT="$(find "$OUT" -maxdepth 1 -type f -name 'mariadb103-client-*.pkg' -print
 SERVER="$(find "$OUT" -maxdepth 1 -type f -name 'mariadb103-server-*.pkg' -print | head -n 1)"
 test -f "$COMPAT" && test -n "$CLIENT" && test -n "$SERVER"
 
-# Remove the temporary compiler toolchain before runtime testing. Success from
-# this point proves the database uses only the repository compatibility pkg.
-rm -rf "$OPENSSL_PREFIX"
+# The private OpenSSL prefix must not participate in the runtime proof.
 ASSUME_ALWAYS_YES=yes pkg delete -fy mariadb103-server mariadb103-client openssl >/dev/null 2>&1 || true
+rm -rf "$OPENSSL_PREFIX"
 ASSUME_ALWAYS_YES=yes pkg install -y "$COMPAT" "$CLIENT" "$SERVER"
 pkg info mysql56-openssl111-compat mariadb103-client mariadb103-server
 mysql --version
@@ -149,6 +153,11 @@ MYSQLD="$(find /usr/local -type f -name mysqld -perm +111 -print 2>/dev/null | h
 test -n "$MYSQLD"
 "$MYSQLD" --version
 if ldd "$MYSQLD" | grep -q 'not found'; then
+  ldd "$MYSQLD"
+  exit 1
+fi
+if ldd "$MYSQLD" | grep -F "$WORK/openssl111"; then
+  echo 'mysqld still references the temporary build-only OpenSSL prefix' >&2
   ldd "$MYSQLD"
   exit 1
 fi
