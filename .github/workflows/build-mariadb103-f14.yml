@@ -79,7 +79,12 @@ jobs:
               member=next(m for m in tf.getmembers() if m.name.endswith('packagesite.yaml'))
               rows=[json.loads(x) for x in tf.extractfile(member).read().decode().splitlines() if x.strip()]
           by={x['name']:x for x in rows}
-          for name in ('mariadb103-client','mariadb103-server','mysql56-openssl111-compat','mysql56-client','mysql56-server'):
+          required=(
+              'mariadb103-client','mariadb103-server',
+              'mysql56-openssl111-compat','mysql56-client','mysql56-server',
+              'mysql55-client','mysql55-server',
+          )
+          for name in required:
               if name not in by:
                   raise SystemExit('missing from catalog: '+name)
               abi=(str(by[name].get('abi',''))+' '+str(by[name].get('arch',''))).lower()
@@ -102,11 +107,16 @@ jobs:
           from pathlib import Path
           p=Path('DB_PACKAGE_MATRIX.md')
           text=p.read_text()
-          old='| 14 | ✅ 11.4.12 | ✅ 10.6.18 | ✅ 10.5.24 | ❌ same-ABI paket bulunamadi | ✅ 5.6.51 (F14 runtime-validated compat) | ❌ same-ABI paket bulunamadi |'
-          new='| 14 | ✅ 11.4.12 | ✅ 10.6.18 | ✅ 10.5.24 | ✅ 10.3.38 (F14 OpenSSL 1.1 compat) | ✅ 5.6.51 (F14 runtime-validated compat) | ❌ same-ABI paket bulunamadi |'
-          if old not in text and new not in text:
-              raise SystemExit('FreeBSD 14 matrix row is not the expected baseline')
-          p.write_text(text.replace(old,new))
+          rows=text.splitlines()
+          target=next((r for r in rows if r.startswith('| 14 |')), None)
+          if target is None:
+              raise SystemExit('FreeBSD 14 matrix row not found')
+          parts=[x.strip() for x in target.split('|')]
+          if len(parts) < 9:
+              raise SystemExit('FreeBSD 14 matrix row has unexpected format')
+          parts[5]='✅ 10.3.38 (F14 OpenSSL 1.1 compat)'
+          replacement='| ' + ' | '.join(parts[1:-1]) + ' |'
+          p.write_text(text.replace(target,replacement))
           PY
 
       - name: Commit validated MariaDB 10.3 packages
