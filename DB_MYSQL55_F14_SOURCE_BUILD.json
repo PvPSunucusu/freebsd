@@ -1,0 +1,29 @@
+[
+  {
+    "major": 14,
+    "name": "mysql55-client",
+    "version": "5.5.62_3",
+    "filename": "mysql55-client-5.5.62_3.pkg",
+    "sha256": "5790eaeca0bcb1f415d14ec14a9004d2a2fc1e20a6c8d3359eb45dfdbeb3c825",
+    "size": 1989858,
+    "arch": "freebsd:14:x86:64",
+    "abi": "FreeBSD:14:amd64",
+    "deps": [
+      "readline"
+    ]
+  },
+  {
+    "major": 14,
+    "name": "mysql55-server",
+    "version": "5.5.62_3",
+    "filename": "mysql55-server-5.5.62_3.pkg",
+    "sha256": "250d515c68ebe36ea0ba223c92ff2f56595b7964694dbe08d27f188007018232",
+    "size": 7971711,
+    "arch": "freebsd:14:x86:64",
+    "abi": "FreeBSD:14:amd64",
+    "deps": [
+      "mysql55-client",
+      "readline"
+    ]
+  }
+]
