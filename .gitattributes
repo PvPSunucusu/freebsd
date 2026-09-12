@@ -1,0 +1,8 @@
+*.pkg binary -delta
+*.txz binary -delta
+*.tzst binary -delta
+*.tbz binary -delta
+*.tgz binary -delta
+*.a binary -delta
+*.so binary -delta
+*.so.* binary -delta
